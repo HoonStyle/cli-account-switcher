@@ -1,0 +1,13 @@
+node_modules/
+dist/
+dist-preview/
+plugins/openclaw/lib/
+*.log
+.DS_Store
+.env
+.env.*
+.cli-accounts*/
+auth.json
+.credentials.json
+oauth_creds.json
+*.sqlite*
