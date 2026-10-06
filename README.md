@@ -1,56 +1,256 @@
+<div align="center">
+
 # CLI Account Switch
 
-Private distribution staging repository. No public release has been made.
+**English** | [한국어](README.ko.md)
 
-## Included
+**Manage your Claude Code and Codex CLI accounts in one place.**
 
-- Local Claude Code / Codex profile selection and pinned CLI launch.
-- Login through each user's unmodified official CLI. Credentials stay with that CLI.
-- Claude status-line usage records and Codex session usage records; no background quota endpoint calls.
-- Managed tasks and optional OpenClaw current-conversation integration.
-- Named, account-scoped model selectors for the coordinator and delegated work.
-- Task status, review and delivery states, and read-only terminal output with periodic refresh.
-- Project-folder selection: a native folder dialog in the app, or server-side folder browsing in the web dashboard.
+Local profiles · CLI launches · Usage records · Managed tasks
 
-Direct usage API modules and credential readers are **not included**. Codex login status is displayed without reading its authentication file; use profile labels to distinguish accounts. Usage may be absent or stale until the official CLI writes a supported local record. No guaranteed live balance or quota display.
+![Preview](https://img.shields.io/badge/status-preview-orange)
+![Node.js](https://img.shields.io/badge/Node.js-24%2B-339933?logo=nodedotjs&logoColor=white)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-## Install / develop
+[Getting started](#getting-started) · [Features](#features) · [How it works](#how-it-works) · [Web dashboard](#web-dashboard) · [Development](#development)
 
-Requires Node.js 24+, npm, Git, and separately installed official CLIs (`claude`, `codex`).
+</div>
+
+---
+
+CLI Account Switch is an Electron desktop app for managing multiple local Claude Code and Codex CLI profiles. It separates configuration homes and launches each official CLI with the selected profile. The official CLIs handle sign-in and model requests.
+
+> **Preview** — Current version: `0.2.0-preview.7`. Signed and notarized installers are not yet available. Windows build configuration is included, but managed task execution on Windows is not supported.
+
+## Screenshots
+
+The three desktop screenshots below use the actual app renderer with synthetic data. Account labels, usage values, model lists, task states, and terminal output are examples—not real accounts or execution results. Screenshots show the current Korean-language UI.
+
+### Account profiles
+
+Select Claude Code and Codex profiles and view locally recorded usage.
+
+<img src="docs/images/account-profiles.png" alt="Claude Code and Codex profile selection with demo data" width="460">
+
+### Task setup and model selection
+
+Choose a project folder, coordinator, model, and participating accounts.
+
+![Task setup and per-account model selection with demo data](docs/images/model-dropdowns.png)
+
+### Task status and terminal output
+
+Inspect delegated work and read-only terminal output in one view.
+
+![Task status and terminal output with demo data](docs/images/terminal-desktop.png)
+
+### Scriptable widget design preview
+
+A reference design for displaying per-account usage and record timestamps. **This is a layout preview generated on macOS, not an iPhone screenshot.** Values do not represent current usage. The widget code and its server are not included in this repository.
+
+<img src="docs/images/scriptable-widget-preview.png" alt="Scriptable usage widget layout preview, not an iPhone screenshot" width="660">
+
+## Features
+
+| Feature | What it does |
+| --- | --- |
+| **Account profiles** | Add and select separate profiles for Claude Code and Codex. |
+| **Profile-specific launches** | Start new CLI sessions with the selected configuration home. |
+| **Shared skills and instructions** | Link skills, instructions, and settings from the default home instead of maintaining duplicate copies. |
+| **Shared stored memory** | Link the existing Codex `memories` directory into new profiles. Conversation sessions are not transferred. |
+| **Local usage records** | Read Claude status-line records and Codex session records. |
+| **Task management** | Track execution, reviews, and result delivery. |
+| **Task context and session resume** | Persist goals, results, reviews, and session IDs; resume the same coordinator session on subsequent turns. |
+| **Web dashboard** | Submit, inspect, respond to, and cancel tasks from a local browser; view terminal output. |
+| **Model selection** | Select account-scoped models for coordination and delegated work. |
+| **Read-only terminal output** | Inspect task output with periodic refresh. |
+| **Project selection** | Use a native folder picker in the app or server-side folder browsing in the dashboard. |
+| **Optional OpenClaw integration** | Connect managed work to the current conversation through a plugin. |
+
+## Getting started
+
+### Requirements
+
+- **Node.js 24+**, npm, and Git
+- The official CLIs you intend to use: Claude Code (`claude`) and Codex (`codex`)
+- Your own accounts with access to the corresponding services
+- A desktop environment capable of running Electron
+
+Install the official CLIs separately. This app does not provide service accounts or subscription access.
+
+### Run from source
 
 ```sh
+git clone https://github.com/HoonStyle/cli-account-switcher.git
+cd cli-account-switcher
 npm ci
-npm test
-npm run test:runtime  # macOS; task execution on Windows remains unsupported
-npm run test:dashboard # macOS; includes isolated Electron UI checks
-npm run test:reset-ui  # macOS; renderer regression checks
 npm start
 ```
 
-Data defaults to `~/.cli-accounts-distribution`, separate from the internal edition (`~/.cli-accounts`). App ID and name are also separate. The display name is **CLI Account Switch**; the existing distribution app ID and data directory are retained for update compatibility. The `default` profile intentionally points to the official CLI's existing default home; that default login and optional status-line settings are shared between editions. Do not enable competing status-line hooks or put both wrapper directories first on PATH. Do not point `CLI_ACCOUNTS_ROOT` at the internal edition's directory. New profiles use their own local directories and official login, without copying credentials.
+Repository access is required while the repository remains private.
 
-The application starts hidden in the menu bar. Open its menu to select an account, add a profile, install the local usage hook, or manage tasks. Existing terminal sessions keep their original accounts; changes apply to new launches.
+### First launch
 
-## Optional OpenClaw integration
+1. Open the app from the menu bar or system tray. It starts hidden by default.
+2. Add a profile for the CLI you want to use.
+3. Complete the official CLI's sign-in flow for that profile.
+4. Select the profile and launch a new CLI session or task.
+5. Configure local usage collection if you want usage indicators.
+
+> Switching profiles affects **new launches only**. It does not change existing terminal sessions or authentication stored independently by other apps.
+
+## How it works
+
+```text
+CLI Account Switch
+  ├─ Claude profile → CLAUDE_CONFIG_DIR → Official Claude Code CLI
+  └─ Codex profile  → CODEX_HOME        → Official Codex CLI
+                                            └─ Direct provider communication
+```
+
+| CLI | Profile configuration home | Environment variable |
+| --- | --- | --- |
+| Claude Code | `~/.cli-accounts-distribution/claude/<profile>/` | `CLAUDE_CONFIG_DIR` |
+| Codex | `~/.cli-accounts-distribution/codex/<profile>/` | `CODEX_HOME` |
+
+New profiles use their own local directories and the official sign-in flow. They do not sign in by copying another account's credentials.
+
+### Default profile and app data
+
+The `default` profile uses the official CLI's existing home, `~/.claude` or `~/.codex`, without a separate configuration-home override. It therefore shares the default login and status-line settings used when running that CLI directly.
+
+App data lives in `~/.cli-accounts-distribution` by default. You can override this with `CLI_ACCOUNTS_ROOT`, but do not reuse another tool's data directory. Avoid duplicate usage hooks and make sure PATH selects the intended CLI wrappers.
+
+## Shared skills, instructions, and memory
+
+Profiles can keep separate logins while sharing skills and instructions. When creating a profile, the app links these existing items from the official CLI's default home:
+
+| CLI | Source | Shared items |
+| --- | --- | --- |
+| Claude Code | `~/.claude/` | `settings.json`, `CLAUDE.md`, `plugins`, `skills`, `agents`, `commands`, `hooks`, `rules` |
+| Codex | `~/.codex/` | `config.toml`, `AGENTS.md`, `skills`, `plugins`, `rules`, `memories` |
+
+For example, profiles linked to `~/.codex/skills` reference the same directory. Editing linked content affects every profile referencing that source. This uses **the CLI's default home as the shared source**, rather than moving skills into a separate registry.
+
+### Stored context is not a conversation session
+
+Instructions such as `CLAUDE.md` and `AGENTS.md`, along with Codex's `memories` directory, are eligible for sharing. The app does not summarize conversations to create memories; creation and use of `memories` depend on the CLI.
+
+Conversation history and running sessions are not part of this shared-file list. **Switching accounts alone does not restore an entire conversation or transfer a running task's context.**
+
+### Sharing behavior
+
+- Sharing is enabled by default when adding a profile in the app.
+- Only source items present at creation time are linked. Existing destination items are not overwritten.
+- The app uses symbolic links, with directory junctions on Windows. If a file link fails, it falls back to a one-time copy; copied files do not stay synchronized.
+- Adding a source item later does not automatically create links in existing profiles.
+- Use the app-installed CLI with `--no-share` to create a profile without shared settings:
+
+```sh
+cli-accounts add codex isolated --no-share
+```
+
+## Task context and session resume
+
+Managed tasks persist their goal, project path, baseline commit, participating accounts, execution attempts, delegated results, reviews, and coordinator session ID in SQLite. The default database is `~/.cli-accounts-distribution/runtime/tasks.sqlite`. Per-attempt records in the runtime directory also retain prompts and results.
+
+Subsequent coordinator turns use Claude's `--resume` or Codex's `exec resume` to continue the same session. Follow-up prompts include delegated results, review states, and additional user input. OpenClaw integration uses the bound conversation's identifiers.
+
+This preserves **managed task context**. It does not collect every terminal conversation or automatically move sessions between accounts. After a service restart, the runtime reconciles persisted execution state and results. Ambiguous execution remains flagged for inspection rather than being blindly relaunched. The original CLI session and profile data must also remain available.
+
+Task records can contain prompts, project paths, and output. Do not commit the runtime directory to a public repository.
+
+## Web dashboard
+
+Use the same task-management interface in a local browser. From the source directory:
+
+```sh
+node src/cli.js dashboard
+# Open http://127.0.0.1:18473 in your browser
+```
+
+If the app-installed `cli-accounts` command is on PATH:
+
+```sh
+cli-accounts dashboard
+cli-accounts dashboard --port 18474
+```
+
+- Choose a project folder, accounts, and models, then submit work.
+- Inspect task status, delegated results, reviews, and read-only terminal output.
+- Respond to requests for input or cancel work through a confirmation step.
+- Folder selection browses **the filesystem of the computer running the server**.
+
+The screenshot below was captured from the actual HTTP dashboard using synthetic data, not real accounts or task execution results.
+
+![Local web dashboard with demo data](docs/images/web-dashboard.png)
+
+### Access and security
+
+The server binds to `127.0.0.1` by default and validates the host, Origin, and request headers. It does not provide a separate user sign-in system. Because it can launch tasks and expose paths and output, do not expose it directly to the internet.
+
+`--public-origin https://host` only adds an allowed origin for a reverse proxy. It does not configure authentication or an HTTPS server. Remote access requires a separately configured proxy with authentication, access controls, and TLS.
+
+## Usage and authentication
+
+- **Claude Code:** usage comes from local status-line records.
+- **Codex:** usage comes from local session records.
+- The official CLIs manage credentials for sign-in and provider communication.
+- The app does not read account credentials to collect email metadata or call usage endpoints directly. Use profile labels to identify accounts.
+
+Usage appears after the CLI writes a supported local record. Missing or older records can leave values unavailable or out of date. **Real-time balances and quotas are not guaranteed.**
+
+## OpenClaw integration
 
 ```sh
 npm run build:plugin
 openclaw plugins install ./plugins/openclaw
 ```
 
-The plugin and tool IDs match the internal edition. Install **one edition's plugin per OpenClaw instance**, not both. This edition connects to the distribution data directory. Requires a compatible OpenClaw runtime (manifest minimum 2026.9.6; verify installed API compatibility).
+- The plugin manifest requires OpenClaw **2026.9.6** or later. Verify API compatibility with your installed version.
+- The plugin uses the app's data directory. Do not install duplicate plugins with the same plugin or tool IDs.
+- Result delivery requires explicit acknowledgment. An ambiguous send/ack boundary does not guarantee exactly-once delivery.
 
-## Build and release
+## Development
+
+### Tests
 
 ```sh
-npm run dist:mac
-npm run dist:win
+npm ci
+npm test                 # Basic behavior
+npm run test:runtime     # Runtime checks — macOS
+npm run test:dashboard   # Dashboard and Electron UI checks — macOS
+npm run test:reset-ui    # Renderer regression checks — macOS
+npm run build:plugin     # Build the OpenClaw plugin
 ```
 
-GitHub CI runs isolated tests; manual dispatch additionally builds unsigned installers and saves workflow artifacts. It does **not** publish a GitHub release or push a tag. Signing/notarization, Windows runtime validation, license selection, and public release approval remain separate release work. Repository code currently has no open-source license grant.
+Electron UI tests require a desktop environment.
 
-## Maintenance
+### Build installers
 
-Shared code is exported from the internal development repository using an allowlist. Export to a fresh directory, compare against this repository, run the test suites, and review changes before committing. Never copy `.git`, account homes, workstation paths, internal review logs, or generated runtime state. `SOURCE_MANIFEST.json` records the current export's file hashes, not private source history.
+```sh
+npm run dist:mac   # Universal macOS DMG
+npm run dist:win   # Windows NSIS installer and portable build
+```
 
-Multiple local profiles do not change provider terms or permissions. This tool does not create accounts, share subscriptions, proxy authentication, rotate on rate limits, or bypass access restrictions. Official CLIs communicate with their providers normally. Task result delivery requires explicit acknowledgement; an ambiguous send/ack boundary does not guarantee exactly-once delivery.
+Artifacts are written to `dist/`. Build on the corresponding operating system. macOS signing and notarization are not currently configured.
+
+### GitHub Actions
+
+The [verification and build workflow](.github/workflows/ci.yml) runs basic tests and plugin builds on macOS and Windows for pushes to `main` and pull requests. macOS also runs runtime, dashboard, and renderer tests.
+
+Manual dispatch (`workflow_dispatch`) builds installers and retains artifacts for seven days. The workflow does not publish GitHub Releases or push tags. Signing, notarization, and Windows runtime validation remain separate tasks.
+
+## Limitations
+
+- The currently enabled CLIs are Claude Code and Codex.
+- Windows installer build configuration is included, but managed task execution on Windows is not supported.
+- Usage depends on local records and may differ from current provider quotas.
+- Profile switching does not change existing CLI sessions or other apps' independent authentication.
+- Provider terms and access requirements still apply. The app does not create accounts, share subscriptions, proxy authentication, rotate accounts on rate limits, or bypass access restrictions.
+
+## License
+
+[MIT License](LICENSE) · Copyright (c) 2026 HoonStyle
+
+External CLIs and services remain subject to their own licenses and terms.

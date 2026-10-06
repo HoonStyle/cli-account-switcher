@@ -4,6 +4,7 @@
   "description": "Local account profiles for official Claude Code and Codex CLIs",
   "main": "src/main.js",
   "private": true,
+  "license": "MIT",
   "scripts": {
     "start": "electron .",
     "test": "node test/smoke.js && node test/distribution.js",
