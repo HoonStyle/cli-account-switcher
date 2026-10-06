@@ -51,7 +51,7 @@
     "test/model-catalog.js": "053a13f672f91c6ca1d7c67e86dae778d90e2fd7c178fb37ef8a432a5cbcb5c4",
     "test/openclaw-basics.js": "92ae330898c7e772cddee79a712172c1f041089038dbacf1c0487317d8681144",
     "test/openclaw-bridge.js": "99af43d26a88f3cc87bb377bd0e8d3c73514575db8ef8a421d7b45db9bf7f171",
-    "test/openclaw-service.js": "f347ed34d8ca836ea96cd9f83872adeb8fa70d158216b643e98cf5533fbf22e1",
+    "test/openclaw-service.js": "8929d29405d69674cfdf55e43b466c8d05ff1d9f78ecda805e0e55bf8e533a95",
     "test/packaged-runtime.js": "a5792aec0e6a5ec0c786b66420a877cdca030d97e50d12e18fea6c329f318efd",
     "test/profile-launch.js": "03e32062f8f15974ea3e1d2bdbc4c717f5d53800c46a898d1e232ff029ee47b5",
     "test/project-folders-ui.js": "00f9a0d926bc3c166b7ca2eede30435aa4c15f352e0d674e69fc76f7c639c59a",

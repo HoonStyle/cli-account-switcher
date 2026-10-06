@@ -2,7 +2,8 @@
 // Real socket + service + runner; only the host wake API and provider are fixtures.
 const fs = require('fs'), os = require('os'), path = require('path'), assert = require('assert/strict');
 const { spawn } = require('child_process');
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'switch-openclaw-service-'));
+// macOS CI uses a long /var/folders TMPDIR; keep the Unix socket below its limit.
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-svc-'));
 process.env.HOME = tmp; process.env.CLI_ACCOUNTS_ROOT = path.join(tmp, 'accounts');
 process.env.CLI_ACCOUNTS_NO_NOTIFICATIONS = '1';
 const store = require('../src/store');
@@ -19,9 +20,17 @@ const client = require('../src/runtime/client');
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 let service;
 async function start() {
-  service = spawn(process.execPath, [path.resolve(__dirname, '../src/runtime/service.js')], { env: process.env, stdio: 'ignore' });
-  for (let i = 0; i < 100; i++) { try { if ((await client.request('health')).pid === service.pid) return; } catch {} await sleep(30); }
-  throw new Error('isolated service did not start');
+  let diagnostics = '';
+  service = spawn(process.execPath, [path.resolve(__dirname, '../src/runtime/service.js')], { env: process.env, stdio: ['ignore', 'ignore', 'pipe'] });
+  service.stderr.setEncoding('utf8');
+  service.stderr.on('data', text => { diagnostics = (diagnostics + text).slice(-8192); });
+  service.on('error', error => { diagnostics = error.message; });
+  for (let i = 0; i < 100; i++) {
+    try { if ((await client.request('health')).pid === service.pid) return; } catch {}
+    if (service.exitCode !== null || service.signalCode !== null) break;
+    await sleep(30);
+  }
+  throw new Error(`isolated service did not start: ${diagnostics || 'health timeout'}`);
 }
 async function stop(signal) {
   const child = service;
