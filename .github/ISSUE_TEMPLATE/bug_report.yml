@@ -1,0 +1,34 @@
+name: Bug report
+description: Report a reproducible problem.
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: "Do not include credentials, tokens, account emails, private project paths, or unredacted session logs. Korean and English reports are welcome."
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: App version or commit, OS, Node.js version, and relevant CLI versions.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include the smallest reproducible example with synthetic data.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include sanitized error messages or screenshots if helpful.
+    validations:
+      required: true

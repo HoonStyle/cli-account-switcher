@@ -1,0 +1,24 @@
+name: Feature request
+description: Suggest an improvement.
+title: "[Feature] "
+body:
+  - type: markdown
+    attributes:
+      value: "Korean and English requests are welcome. Do not include credentials or private account information."
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What are you trying to accomplish?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
