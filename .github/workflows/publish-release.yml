@@ -56,9 +56,11 @@ jobs:
           gh run download "$BUILD_RUN_ID" --name unsigned-macOS --dir artifacts/macOS
           gh run download "$BUILD_RUN_ID" --name unsigned-Windows --dir artifacts/Windows
           mkdir release
-          cp "artifacts/macOS/CLI Account Switch-$VERSION-mac-universal.dmg" release/
-          cp "artifacts/Windows/CLI Account Switch-$VERSION-win-x64-setup.exe" release/
-          cp "artifacts/Windows/CLI Account Switch-$VERSION-win-x64-portable.exe" release/
+          # GitHub normalizes spaces in uploaded asset names. Use those exact
+          # download names before hashing so sha256sum -c works after download.
+          cp "artifacts/macOS/CLI Account Switch-$VERSION-mac-universal.dmg" "release/CLI.Account.Switch-$VERSION-mac-universal.dmg"
+          cp "artifacts/Windows/CLI Account Switch-$VERSION-win-x64-setup.exe" "release/CLI.Account.Switch-$VERSION-win-x64-setup.exe"
+          cp "artifacts/Windows/CLI Account Switch-$VERSION-win-x64-portable.exe" "release/CLI.Account.Switch-$VERSION-win-x64-portable.exe"
           (cd release && sha256sum *.dmg *.exe > SHA256SUMS.txt)
       - name: Publish prerelease
         env:
