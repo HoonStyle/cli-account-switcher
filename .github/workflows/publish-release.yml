@@ -1,0 +1,54 @@
+name: Publish preview release
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify build and download artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api repos/$GH_REPO/actions/runs/37403067283 > run.json
+          test "$(jq -r .conclusion run.json)" = success
+          test "$(jq -r .head_sha run.json)" = 95d218129e2012d008617af9c87614eab42d4243
+          test "$(jq -r .path run.json)" = .github/workflows/ci.yml
+          gh run download 37403067283 --dir artifacts
+          mkdir release
+          find artifacts -maxdepth 2 -type f \( -name '*.dmg' -o -name '*.exe' \) -exec cp {} release/ \;
+          test "$(find release -name '*.dmg' | wc -l)" -ge 1
+          test "$(find release -name '*.exe' | wc -l)" -ge 2
+          (cd release && sha256sum *.dmg *.exe > SHA256SUMS.txt)
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          cat > notes.md <<'EOF'
+          ## CLI Account Switch — Preview 7
+
+          Local Claude Code and Codex profiles, shared skills and instructions, persistent managed tasks, session resume, and a local web dashboard.
+
+          ### Downloads
+          - macOS: universal DMG (Apple Silicon and Intel).
+          - Windows: NSIS setup and portable executables.
+          - SHA256SUMS.txt: installer checksums.
+
+          ### Before installing
+          - Preview software; installers are unsigned and macOS is not notarized.
+          - Install the official Claude Code / Codex CLIs separately and sign in with your own accounts.
+          - Windows managed task execution is not supported. Windows build/basic checks are not full runtime validation.
+          - Usage comes from local records and may be stale. Switching profiles affects new launches only.
+          - Scriptable imagery is a design preview; widget code and its server are not included.
+
+          Built from `95d218129e2012d008617af9c87614eab42d4243` in successful workflow run #37403067283. macOS runtime/UI tests and Windows basic tests/build passed.
+
+          MIT License. See README.md and README.ko.md for setup and limitations.
+          EOF
+          gh release create v0.2.0-preview.7 release/* --target 95d218129e2012d008617af9c87614eab42d4243 --title 'CLI Account Switch v0.2.0-preview.7' --notes-file notes.md --prerelease
