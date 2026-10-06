@@ -4,7 +4,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'profile-launch-'));
+// Keep the initially absent default home stable when macOS TMPDIR is an alias.
+// Explicit profile-symlink retargeting is exercised separately below.
+const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'profile-launch-')));
 process.env.CLI_ACCOUNTS_ROOT = root;
 process.env.HOME = path.join(root, 'user-home');
 fs.mkdirSync(process.env.HOME);

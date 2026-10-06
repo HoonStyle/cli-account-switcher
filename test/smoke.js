@@ -31,7 +31,8 @@ try {
     fs.writeFileSync(probe, '#!/bin/sh\necho "CLAUDE_CONFIG_DIR=$CLAUDE_CONFIG_DIR"\n', { mode: 0o755 });
     s.realBin.claude = probe; store.save(s);
     const out = execFileSync('/bin/sh', [path.join(P.BIN_DIR, 'claude')], { encoding: 'utf8', env: process.env });
-    assert(out.includes(`CLAUDE_CONFIG_DIR=${r.home}`));
+    // Pinned launch canonicalizes profile homes; macOS /tmp and /var are aliases.
+    assert.equal(out.trim(), `CLAUDE_CONFIG_DIR=${fs.realpathSync(r.home)}`);
   }
   store.rename('claude', 'work', 'Work account');
   assert.equal(store.resolve('claude', 'Work account'), 'work');

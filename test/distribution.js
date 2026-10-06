@@ -40,7 +40,7 @@ try {
   assert.equal(codex.inspect(b.home).email, null);
   assert.equal(calls.length, 2);
   assert.equal(calls[0].env.CLAUDE_CONFIG_DIR, a.home);
-  assert.equal(calls[1].env.CODEX_HOME, b.home);
+  assert.equal(calls[1].env.CODEX_HOME, fs.realpathSync(b.home));
   assert.equal(calls[0].env.ANTHROPIC_API_KEY, undefined);
   assert.equal(calls[1].env.OPENAI_API_KEY, undefined);
   claude.inspect(P.DEFAULT_HOME.claude);
