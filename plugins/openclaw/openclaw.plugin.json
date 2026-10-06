@@ -1,0 +1,21 @@
+{
+  "id": "cli-account-switcher",
+  "name": "CLI Account Switch",
+  "description": "Current-conversation coordination for isolated CLI account tasks",
+  "categories": [
+    "developer-tools"
+  ],
+  "contracts": {
+    "tools": [
+      "account_tasks"
+    ]
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "distribution",
+  "version": "0.2.0-preview.7",
+  "dataDirectory": ".cli-accounts-distribution",
+  "directUsageApi": false,
+  "credentialMetadata": false
+}

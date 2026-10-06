@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'">
+<title>CLI Account Switch</title>
+<style>
+  :root {
+    --bg:#0f172a; --card:#1b2336; --muted:#272f42; --line:#334155;
+    --fg:#f8fafc; --fg-muted:#94a3b8; --accent:#22c55e; --on-accent:#0f172a;
+    --warn:#fbbf24; --danger:#ef4444; --ring:#ffffff; --credit:#bbf7d0; --reset:#bae6fd;
+    --s1:4px; --s2:8px; --s3:12px; --s4:16px; --radius:8px;
+    --t:150ms ease-out;
+  }
+  @media (prefers-reduced-motion: reduce) { :root { --t:0ms; } }
+  * { box-sizing:border-box; }
+  [hidden] { display:none !important; }
+  html, body { margin:0; height:100%; background:transparent; }
+  body { font:13px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif; color:var(--fg); -webkit-user-select:none; user-select:none; }
+  .num { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+  #panel { display:flex; flex-direction:column; height:100vh; background:var(--bg); border-radius:12px; overflow:hidden; border:1px solid var(--line); }
+  #panel.fit { height:auto; }  /* measurement mode: natural height */
+
+  header { display:flex; align-items:center; justify-content:space-between; padding:var(--s2) var(--s3); border-bottom:1px solid var(--line); }
+  header h1 { font-size:12px; font-weight:600; margin:0; color:var(--fg-muted); letter-spacing:.02em; }
+  .iconbtn { width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center; background:transparent; border:0; border-radius:6px; color:var(--fg-muted); cursor:pointer; transition:background var(--t), color var(--t); }
+  .iconbtn:hover { background:var(--muted); color:var(--fg); }
+  .iconbtn.spin svg { animation: spin 800ms linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .iconbtn.spin svg { animation:none; opacity:.5; } }
+  .iconbtn:focus-visible, button:focus-visible, input:focus-visible { outline:2px solid var(--ring); outline-offset:1px; }
+  svg { width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:1.75; stroke-linecap:round; stroke-linejoin:round; }
+
+  .banner { display:flex; align-items:center; gap:var(--s2); padding:var(--s2) var(--s3); font-size:12px; background:rgba(245,158,11,.12); color:#fbbf24; border-bottom:1px solid var(--line); }
+  .banner span { flex:1; }
+  .banner button + button { margin-left:var(--s1); }
+
+  main { flex:1; overflow-y:auto; padding:var(--s2) 0; }
+  main::-webkit-scrollbar { width:6px; } main::-webkit-scrollbar-thumb { background:var(--line); border-radius:3px; }
+  section + section { margin-top:var(--s2); border-top:1px solid var(--line); padding-top:var(--s2); }
+  h2 { margin:0; padding:var(--s1) var(--s3); font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--fg-muted); }
+
+  .row { display:grid; grid-template-columns:20px 1fr auto 28px; align-items:center; column-gap:var(--s2); padding:var(--s2) var(--s3); min-height:44px; cursor:pointer; transition:background var(--t); }
+  .row:hover { background:var(--card); }
+  .row[aria-checked="true"] { background:var(--card); }
+  .row .check { color:var(--accent); visibility:hidden; }
+  .row[aria-checked="true"] .check { visibility:visible; }
+  .row .id { min-width:0; }
+  .row .name { font-weight:600; font-size:13px; }
+  .row .name input.rename { width:140px; height:24px; background:var(--card); border:1px solid var(--accent); border-radius:5px; color:var(--fg); padding:0 6px; font:inherit; font-weight:600; -webkit-user-select:text; user-select:text; }
+  .row .name .tag { font-weight:500; font-size:10.5px; color:var(--fg-muted); margin-left:var(--s1); }
+  .row .name .plan { font-weight:600; font-size:10px; color:#bbf7d0; background:rgba(34,197,94,.14); border:1px solid rgba(34,197,94,.35); border-radius:99px; padding:1px 6px; margin-left:6px; vertical-align:1px; }
+  .row .email { font-size:11.5px; color:var(--fg-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .row .email.warn { color:#fbbf24; }
+  .row .usage { text-align:right; font-size:11px; color:var(--fg-muted); line-height:1.35; }
+  .row .usage b { color:var(--fg); font-weight:600; }
+  .resources { grid-column:2 / 4; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:var(--s2); padding:var(--s2) 0 var(--s1); }
+  .resource { display:grid; grid-template-columns:1fr auto; align-content:start; align-items:baseline; gap:2px 6px; min-width:0; border-top:1px solid var(--line); padding-top:var(--s1); font-size:12px; }
+  .resource-label { color:var(--fg-muted); }
+  .resource b { color:var(--credit); font-size:13px; font-weight:600; overflow-wrap:anywhere; }
+  .reset-credits b { color:var(--reset); }
+  .reset-credits.stale b { color:var(--fg-muted); }
+  .resource.unknown b { color:var(--fg-muted); }
+  .resource-note { grid-column:1 / -1; color:var(--fg-muted); font-size:11px; overflow-wrap:anywhere; }
+  .reset-credits.stale .resource-note { color:var(--warn); }
+  .row .usage .hi { color:#fbbf24; } .row .usage .crit { color:#f87171; }
+  .row .usage .muted-sfx { font-size:9px; color:var(--fg-muted); margin-left:1px; }
+  .row .more { opacity:0; transition:opacity var(--t); }
+  .row:hover .more, .row:focus-within .more, .row .more[aria-expanded="true"] { opacity:1; }
+
+  /* Compact density (default): one line per account, ~32px rows. Same DOM, CSS only. */
+  body.compact h2 { padding:2px var(--s3) 2px; }
+  body.compact section + section { margin-top:var(--s1); padding-top:var(--s1); }
+  body.compact .row { grid-template-columns:18px 1fr auto 24px; padding:3px var(--s3); min-height:30px; column-gap:6px; }
+  body.compact .row .id { display:flex; align-items:baseline; gap:6px; min-width:0; }
+  body.compact .row .name { font-size:12.5px; white-space:nowrap; flex:0 0 auto; }
+  body.compact .row .name .plan { font-size:9.5px; padding:0 5px; margin-left:4px; }
+  body.compact .row .name .tag { display:none; } /* "기본" moves to the name tooltip */
+  body.compact .row .email { flex:1 1 auto; font-size:11px; }
+  body.compact .row .usage { display:flex; gap:10px; white-space:nowrap; line-height:1.3; }
+  body.compact .resources { padding-top:4px; }
+  .row:focus-visible { outline:2px solid var(--ring); outline-offset:-2px; }
+  body.compact .row .more { width:24px; height:24px; }
+  body.compact .row .btn.small { height:22px; font-size:11px; padding:0 7px; }
+  body.compact .addrow { padding:0 var(--s3) var(--s1); }
+  body.compact .addrow .link { min-height:26px; padding:3px 4px; font-size:11.5px; }
+  body.compact .addrow:not(.open) { min-height:26px; }
+
+  .addrow { display:flex; align-items:center; gap:var(--s2); padding:var(--s1) var(--s3) var(--s2); }
+  .addrow .link { background:transparent; border:0; color:var(--fg-muted); font-size:12px; cursor:pointer; padding:6px 4px; display:inline-flex; align-items:center; gap:6px; border-radius:6px; min-height:32px; }
+  .addrow .link:hover { color:var(--fg); background:var(--card); }
+  /* Row 1: [name input][추가 후 로그인][취소]  Row 2: [☐ 폴더도 같은 이름] */
+  .addrow form { display:none; grid-template-columns:1fr auto auto; gap:6px var(--s2); flex:1; align-items:center; }
+  .addrow.open form { display:grid; }
+  .addrow form input:not([type=checkbox]) { min-width:0; }
+  .addrow .opt { grid-column:1 / -1; display:inline-flex; align-items:center; gap:5px; font-size:11px; color:var(--fg-muted); cursor:pointer; white-space:nowrap; }
+  .addrow .opt input { width:13px; height:13px; margin:0; accent-color:var(--accent); }
+  .addrow.open .link { display:none; }
+  .addrow input { flex:1; min-width:0; height:32px; background:var(--card); border:1px solid var(--line); border-radius:6px; color:var(--fg); padding:0 var(--s2); font-size:12.5px; -webkit-user-select:text; user-select:text; }
+  .addrow input::placeholder { color:var(--fg-muted); }
+  .btn { height:32px; padding:0 var(--s3); border-radius:6px; border:1px solid var(--line); background:var(--muted); color:var(--fg); font-size:12px; cursor:pointer; transition:background var(--t); }
+  .btn:hover { background:#31405a; }
+  .btn.primary { background:var(--accent); border-color:var(--accent); color:var(--on-accent); font-weight:600; }
+  .btn.primary:hover { background:#4ade80; }
+  .btn.small { height:26px; padding:0 var(--s2); font-size:11.5px; }
+  .hint { padding:0 var(--s3) var(--s2); font-size:11px; color:var(--fg-muted); }
+  .hint.err { color:#f87171; }
+
+  footer { display:flex; align-items:center; justify-content:space-between; padding:var(--s1) var(--s2) var(--s1) var(--s3); border-top:1px solid var(--line); font-size:11px; color:var(--fg-muted); }
+  footer .status { display:inline-flex; align-items:center; gap:6px; }
+  .dot { width:7px; height:7px; border-radius:50%; background:var(--fg-muted); }
+  .dot.on { background:var(--accent); }
+
+  .menu { position:fixed; z-index:100; min-width:168px; background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:var(--s1); box-shadow:0 8px 24px rgba(0,0,0,.45); }
+  .menu button { display:flex; align-items:center; gap:var(--s2); width:100%; text-align:left; background:transparent; border:0; color:var(--fg); font-size:12.5px; padding:7px var(--s2); border-radius:6px; cursor:pointer; min-height:32px; }
+  .menu button:hover { background:var(--muted); }
+  .menu button.danger { color:#f87171; }
+  .menu hr { border:0; border-top:1px solid var(--line); margin:var(--s1) 0; }
+  .menu .k { margin-left:auto; color:var(--fg-muted); font-size:11px; }
+</style>
+</head>
+<body>
+<div id="panel">
+  <header>
+    <h1>CLI Account Switch</h1>
+    <div>
+      <button class="iconbtn" id="refreshBtn" aria-label="새로고침" title="새로고침 (⌘R)"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7"/><path d="M20 4v5h-5"/></svg></button>
+      <button class="iconbtn" id="settingsBtn" aria-label="설정" aria-haspopup="menu"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+    </div>
+  </header>
+  <div id="pathBanner" class="banner" hidden></div>
+  <main>
+    <section id="claude"><h2>Claude Code</h2><div class="list" role="radiogroup" aria-label="Claude Code 계정"></div>
+      <div class="addrow"><button class="link"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>계정 추가</button>
+        <form><input placeholder="계정 이름 (예: 회사, work)" autocomplete="off" spellcheck="false"><button type="submit" class="btn primary">추가 후 로그인</button><button type="button" class="btn cancel">취소</button><label class="opt" title="끄면 폴더는 acct-xxxxxx 같은 임의 이름으로 만들고 입력한 이름은 표시용으로만 씁니다"><input type="checkbox" class="samefolder" checked>폴더도 같은 이름 (한글 등은 자동 해제)</label></form></div></section>
+    <section id="codex"><h2>Codex</h2><div class="list" role="radiogroup" aria-label="Codex 계정"></div>
+      <div class="addrow"><button class="link"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>계정 추가</button>
+        <form><input placeholder="계정 이름 (예: 개인, personal)" autocomplete="off" spellcheck="false"><button type="submit" class="btn primary">추가 후 로그인</button><button type="button" class="btn cancel">취소</button><label class="opt" title="끄면 폴더는 acct-xxxxxx 같은 임의 이름으로 만들고 입력한 이름은 표시용으로만 씁니다"><input type="checkbox" class="samefolder" checked>폴더도 같은 이름 (한글 등은 자동 해제)</label></form></div></section>
+  </main>
+  <footer>
+    <span class="status"><i class="dot" id="hookDot"></i><span id="hookText"></span></span>
+    <span id="msg" role="status" aria-live="polite"></span>
+  </footer>
+</div>
+<script src="renderer.js"></script>
+</body>
+</html>

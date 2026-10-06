@@ -1,0 +1,67 @@
+{
+  "name": "cli-account-switch",
+  "version": "0.2.0-preview.7",
+  "description": "Local account profiles for official Claude Code and Codex CLIs",
+  "main": "src/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/smoke.js && node test/distribution.js",
+    "dist:mac": "electron-builder --mac --universal",
+    "dist:win": "electron-builder --win",
+    "test:runtime": "node test/profile-launch.js && node test/runtime.js && node test/runtime-observation.js && node test/runtime-models.js && node test/runtime-output.js && node test/runtime-faults.js && node test/runtime-service.js && node test/runtime-review-contracts.js && node test/openclaw-bridge.js && node test/openclaw-basics.js && node test/rpc-unicode.js && node test/openclaw-service.js",
+    "build:plugin": "node scripts/build-openclaw-plugin.js",
+    "test:dashboard": "node test/model-catalog.js && node test/dashboard.js && electron test/tasks-ui.js && electron test/tasks-status-ui.js && electron test/tasks-terminal-ui.js && electron test/project-folders-ui.js",
+    "test:reset-ui": "electron test/reset-credits-ui.js"
+  },
+  "devDependencies": {
+    "electron": "^44.4.2",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "dev.hoonstyle.cli-account-switcher.distribution",
+    "productName": "CLI Account Switch",
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "category": "public.app-category.developer-tools",
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "extendInfo": {
+        "LSUIElement": true
+      }
+    },
+    "dmg": {
+      "writeUpdateInfo": false
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "${productName}-${version}-win-${arch}-setup.${ext}"
+    },
+    "publish": null,
+    "portable": {
+      "artifactName": "${productName}-${version}-win-${arch}-portable.${ext}"
+    }
+  },
+  "author": "HoonStyle"
+}
