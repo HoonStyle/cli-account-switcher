@@ -6,7 +6,7 @@ const client = require('../runtime/client');
 const { modelCatalog } = require('../model-catalog');
 const { createFolderBrowser } = require('../project-folders');
 
-function createDashboard({ port = 18473, publicOrigin, runtime = client, accountStore = store, catalog = modelCatalog, browseFolders = createFolderBrowser() } = {}) {
+function createDashboard({ port = 18473, publicOrigin, runtime = client, accountStore = store, catalog = modelCatalog, browseFolders = createFolderBrowser(), openclaw = require('./openclaw').createOpenClawMonitor() } = {}) {
   const origins = new Set([`http://127.0.0.1:${port}`, `http://localhost:${port}`]);
   if (publicOrigin) {
     const u = new URL(publicOrigin);
@@ -39,6 +39,9 @@ function createDashboard({ port = 18473, publicOrigin, runtime = client, account
       // invoking the local runtime; no CORS or arbitrary RPC endpoint is exposed.
       if (req.headers['x-cli-accounts'] !== 'dashboard') return json(res, 403, { error: 'Dashboard header required' });
       if (req.method === 'GET') {
+        if (url.pathname === '/api/openclaw/tasks') return json(res, 200, await openclaw.list());
+        const external = url.pathname.match(/^\/api\/openclaw\/tasks\/([^/]+)$/);
+        if (external) return json(res, 200, await openclaw.get(text(decodeURIComponent(external[1]), 'OpenClaw record ID', 100)));
         if (url.pathname === '/api/folders') return json(res, 200, await browseFolders(url.searchParams.get('path') || ''));
         if (url.pathname === '/api/state') {
           const state = accountStore.load();
@@ -59,10 +62,12 @@ function createDashboard({ port = 18473, publicOrigin, runtime = client, account
         for await (const chunk of req) { size += chunk.length; if (size > 65536) { json(res, 413, { error: 'Request too large' }); return; } chunks.push(chunk); }
         const data = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
         if (url.pathname === '/api/tasks') return json(res, 200, await rpc('submit', submission(data, accountStore.load())));
-        const match = url.pathname.match(/^\/api\/tasks\/([^/]+)\/(cancel|respond|ack)$/);
+        const match = url.pathname.match(/^\/api\/tasks\/([^/]+)\/(cancel|respond|resume|ack)$/);
         if (match) {
           const id = text(decodeURIComponent(match[1]), 'task ID', 200), method = match[2];
+          if (id.startsWith('oc-')) return json(res, 403, { error: 'OpenClaw 기록은 읽기 전용입니다.' });
           const params = { id };
+          if (method === 'resume') params.request = data.request;
           if (method === 'respond') params.message = text(data.message, 'message');
           if (method === 'ack') { if (!Number.isInteger(data.version) || data.version < 1) throw Error('Invalid result version'); params.version = data.version; }
           return json(res, 200, await rpc(method, params));

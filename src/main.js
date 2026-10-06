@@ -289,10 +289,15 @@ ipcMain.handle('tasksChooseProject', async (event, current) => {
 ipcMain.handle('tasksStart', async (event) => { taskSender(event); return taskRequest('health'); });
 ipcMain.handle('tasksBindings', async (event) => { taskSender(event); return taskRequest('bridgeBindings'); });
 ipcMain.handle('tasksList', async (event) => { taskSender(event); return taskRequest('list'); });
+const openclawMonitor = require('./dashboard/openclaw').createOpenClawMonitor();
+ipcMain.handle('tasksExternalList', async (event) => { taskSender(event); return openclawMonitor.list(); });
+ipcMain.handle('tasksExternalGet', async (event, id) => { taskSender(event); return openclawMonitor.get(taskText(id, 'OpenClaw 기록 ID', 100)); });
 ipcMain.handle('tasksGet', async (event, id) => { taskSender(event); return taskRequest('get', { id: taskText(id, '작업 ID', 200) }); });
 ipcMain.handle('tasksOutput', async (event, id, attemptId) => { taskSender(event); return taskRequest('output', { id: taskText(id, '작업 ID', 200), attemptId: taskText(attemptId, '실행 ID', 200) }); });
-ipcMain.handle('tasksCancel', async (event, id) => { taskSender(event); return taskRequest('cancel', { id: taskText(id, '작업 ID', 200) }); });
-ipcMain.handle('tasksRespond', async (event, id, message) => { taskSender(event); return taskRequest('respond', { id: taskText(id, '작업 ID', 200), message: taskText(message, '추가 지시') }); });
+function mutableTaskId(id) { const value=taskText(id, '작업 ID', 200); if(value.startsWith('oc-'))throw Error('OpenClaw 기록은 읽기 전용입니다.'); return value; }
+ipcMain.handle('tasksCancel', async (event, id) => { taskSender(event); return taskRequest('cancel', { id: mutableTaskId(id) }); });
+ipcMain.handle('tasksResume', async (event, id, request) => { taskSender(event); return taskRequest('resume', { id: mutableTaskId(id), request }); });
+ipcMain.handle('tasksRespond', async (event, id, message) => { taskSender(event); return taskRequest('respond', { id: mutableTaskId(id), message: taskText(message, '추가 지시') }); });
 ipcMain.handle('tasksSubmit', async (event, input) => {
   taskSender(event);
   const params = require('./runtime/submission').submission(input, store.load());
@@ -302,5 +307,5 @@ ipcMain.handle('tasksSubmit', async (event, input) => {
 ipcMain.handle('tasksAck', async (event, id, version) => {
   taskSender(event);
   if (!Number.isInteger(version) || version < 1) throw new Error('결과 버전이 올바르지 않습니다.');
-  return taskRequest('ack', { id: taskText(id, '작업 ID', 200), version });
+  return taskRequest('ack', { id: mutableTaskId(id), version });
 });

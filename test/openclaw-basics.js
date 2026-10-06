@@ -133,7 +133,8 @@ test('suspended coordinator rejects local continuation without creating unreacha
     assert.equal(f.e.attempts(f.root.id).length, 1);
     f.e.bindOpenClaw(owner);
     assert.equal(f.e.root(f.root.id).attention, 'input needed');
-    f.e.respond(f.root.id, 'continue'); assert.equal(f.e.openClawPending().length, 1);
+    assert.throws(() => f.e.respond(f.root.id, 'continue'), /mismatch/);
+    f.e.respond(f.root.id, 'continue', owner); assert.equal(f.e.openClawPending().length, 1);
   } finally { f.close(); }
 });
 test('OpenClaw coordinator instructions require tools and verified delivery, not CLI JSON output', () => {
@@ -168,7 +169,7 @@ async function harness(f) {
     throw new Error(`Unexpected method ${method}`);
   } };
   h.bridge = registerBridge(api, client, store); h.bridge.startForTest();
-  h.call = (params, identity = owner) => h.tool.create({ ...identity, assertInvocationCurrent() {} }).execute('call', params);
+  h.call = async (params, identity = owner) => { const reply = await h.tool.create({ ...identity, assertInvocationCurrent() {} }).execute('call', params); return { ...reply, details: JSON.parse(reply.content[0].text) }; };
   return h;
 }
 test('plugin happy path connects, submits, reviews and only acknowledges on explicit ack', async () => {
@@ -193,6 +194,9 @@ test('all plugin task actions reject foreign agent, conversation and session own
     const foreign = [{ ...owner, agentId: 'other', sessionKey: 'agent:other:discord:channel:fixture' }, { ...owner, sessionKey: 'agent:main:discord:channel:other' }, { ...owner, sessionId: 'other' }];
     for (const identity of foreign) for (const action of ['get', 'decide', 'cancel', 'respond', 'ack']) {
       await assert.rejects(h.call({ action, id: f.root.id, version: 1, message: 'x' }, identity), /mismatch|reset or removed/);
+    }
+    for (const identity of foreign) for (const view of ['summary', 'tasks', 'task', 'context', 'final']) {
+      await assert.rejects(h.call({ action: 'get', view, id: f.root.id, taskId: 'any' }, identity), /mismatch|reset or removed/);
     }
     assert.equal(f.e.root(f.root.id).status, 'planning');
   } finally { f.close(); }

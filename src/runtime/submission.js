@@ -1,6 +1,7 @@
 'use strict';
 const path = require('path');
 const { normalizeModel } = require('../launch/model');
+const { normalizeExecutionPolicy } = require('./execution-policy');
 function text(value, name, max = 10000) {
   if (typeof value !== 'string' || !value.trim() || value.length > max) throw new Error(`Invalid ${name}`);
   return value;
@@ -18,6 +19,7 @@ function submission(input, state) {
   const projectPath = text(input.projectPath, 'project path', 4096);
   if (!path.isAbsolute(projectPath)) throw new Error('Project path must be absolute');
   const params = { requestId: text(input.requestId, 'request ID', 200), goal: text(input.goal, 'goal'), projectPath, mainTool, participants, permission: input.permission };
+  params.executionPolicy = normalizeExecutionPolicy(input.permission, input.executionPolicy);
   params.mainModel = normalizeModel(input.mainModel);
   if (mainTool === 'openclaw') {
     if (params.mainModel) throw new Error('OpenClaw main model is controlled by its conversation');

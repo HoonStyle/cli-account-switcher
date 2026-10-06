@@ -49,7 +49,7 @@ async function stop(signal) {
     enqueueSystemEvent(text, options) { events.push({ text, options }); }, requestHeartbeat() { wakes++; },
   } }, session: { workflow: { enqueueNextTurnInjection: async () => ({ id: 'fixture-injection' }) } }, registerTool(t) { tool = t; }, registerService() {}, lifecycle: { registerRuntimeLifecycle() {} } };
   const bridge = registerBridge(api, client, store); bridge.startForTest();
-  const call = async params => (await tool.create({ ...owner, assertInvocationCurrent() {} }).execute('fixture', params)).details;
+  const call = async params => JSON.parse((await tool.create({ ...owner, assertInvocationCurrent() {} }).execute('fixture', params)).content[0].text);
   await call({ action: 'connect' });
   const created = await call({ action: 'submit', requestId: 'service-roundtrip', projectPath: tmp, goal: '한글 결과 읽기', participants: [{ tool: 'claude', profileId: 'fixture', model: 'fixture-model' }] });
   const id = created.root.id;
@@ -60,6 +60,10 @@ async function stop(signal) {
   for (let i = 0; i < 100; i++) { detail = await call({ action: 'get', id }); if (detail.root.status === 'awaiting_review') break; await sleep(100); }
   assert.equal(detail.root.status, 'awaiting_review');
   assert.equal(detail.tasks[0].result.summary, '한글 결과 fixture-model');
+  const taskPage = await call({ action: 'get', id, view: 'task', taskId: detail.tasks[0].id, resultVersion: 1 });
+  assert.equal(taskPage.page.resultVersion, 1); assert.match(taskPage.page.text, /한글 결과 fixture-model/);
+  const contextPage = await call({ action: 'get', id, view: 'context', generation: 1 });
+  assert.match(contextPage.page.text, /한글 결과 읽기/);
   assert.equal(detail.root.participants[0].model, 'fixture-model');
   const review = detail.attempts.find(a => a.state === 'external_wait');
   await call({ action: 'decide', id, attemptId: review.id, generation: 1, decision: { kind: 'complete', summary: '검토 완료', delegations: [], reviews: [{ taskId: detail.tasks[0].id, resultVersion: 1, decision: 'accepted', reason: 'fixture checked' }], finalResponse: '한글 최종 결과' } });
@@ -69,6 +73,8 @@ async function stop(signal) {
   await bridge.poll(); assert.equal(wakes, 2); assert.match(events[1].text, /finalVersion=1/);
   detail = await call({ action: 'get', id });
   assert.equal(detail.root.status, 'ready'); assert.equal(detail.root.finalDelivery, 'pending');
+  const finalPage = await call({ action: 'get', id, view: 'final', version: 1 });
+  assert.equal(finalPage.page.text, '한글 최종 결과'); assert.equal(finalPage.page.done, true);
   assert.equal(detail.root.deliveryWakeAttempts, 1);
   const nextWakeAt = detail.root.nextDeliveryWakeAt;
   await stop('SIGTERM'); await start();

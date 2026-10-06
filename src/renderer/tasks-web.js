@@ -11,9 +11,14 @@ window.api = {
   tasksBrowseFolders: path => request('/api/folders?path=' + encodeURIComponent(path || '')),
   tasksStart: () => request('/api/health'), tasksBindings: () => request('/api/bindings'),
   tasksList: () => request('/api/tasks'), tasksGet: id => request(`/api/tasks/${encodeURIComponent(id)}`),
+  tasksExternalList: () => request('/api/openclaw/tasks'),
+  tasksExternalGet: id => request(`/api/openclaw/tasks/${encodeURIComponent(id)}`),
   tasksOutput: (id, attemptId) => request(`/api/tasks/${encodeURIComponent(id)}/attempts/${encodeURIComponent(attemptId)}/output`),
   tasksSubmit: input => request('/api/tasks', input),
   tasksCancel: id => request(`/api/tasks/${encodeURIComponent(id)}/cancel`, {}),
+  tasksResume: (id, request) => requestTaskResume(id, request),
   tasksRespond: (id, message) => request(`/api/tasks/${encodeURIComponent(id)}/respond`, { message }),
   tasksAck: (id, version) => request(`/api/tasks/${encodeURIComponent(id)}/ack`, { version }),
 };
+
+function requestTaskResume(id, body) { return request(`/api/tasks/${encodeURIComponent(id)}/resume`, { request: body }); }

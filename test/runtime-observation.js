@@ -119,7 +119,7 @@ try {
   recovery.db.put('attempt', a);
   recovery.db.put('task', { id: a.taskId, rootId: r.id, state: 'queued', review: null });
   fs.mkdirSync(a.dir);
-  const receipt = changes => fs.writeFileSync(path.join(a.dir, 'live.json'), JSON.stringify({ attemptId: a.id, token: a.token, at: now - 1000, lastOutputAt: now - 1000, lastProgressAt: null, ...changes }));
+  const receipt = changes => fs.writeFileSync(path.join(a.dir, 'live.json'), JSON.stringify({ attemptId: a.id, token: a.token, childPid: 12345, at: now - 1000, lastOutputAt: now - 1000, lastProgressAt: null, ...changes }));
   const attention = reason => { const current = recovery.root(r.id); current.attention = reason; recovery.db.put('root', current); };
   receipt({}); recovery.tick();
   assert.equal(recovery.root(r.id).attention, null, 'Claude output after >5 minutes must not require Codex-only progress events');

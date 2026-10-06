@@ -1,54 +1,74 @@
 name: Publish preview release
 on:
   workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: Successful verify-and-build manual run with both installer artifacts
+        required: true
+        type: string
+      expected_sha:
+        description: Full commit SHA verified by that build
+        required: true
+        type: string
 permissions:
   contents: write
   actions: read
 jobs:
   publish:
     runs-on: ubuntu-latest
+    concurrency:
+      group: publish-preview-release
+      cancel-in-progress: false
     steps:
-      - name: Verify build and download artifacts
+      - name: Verify build provenance
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
         run: |
           set -euo pipefail
-          gh api repos/$GH_REPO/actions/runs/37403067283 > run.json
+          [[ "$BUILD_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN_ID" > run.json
+          test "$(jq -r .status run.json)" = completed
           test "$(jq -r .conclusion run.json)" = success
-          test "$(jq -r .head_sha run.json)" = 95d218129e2012d008617af9c87614eab42d4243
+          test "$(jq -r .head_sha run.json)" = "$EXPECTED_SHA"
           test "$(jq -r .path run.json)" = .github/workflows/ci.yml
-          gh run download 37403067283 --dir artifacts
+          test "$(jq -r .event run.json)" = workflow_dispatch
+          test "$(jq -r .head_repository.full_name run.json)" = "$GH_REPO"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.expected_sha }}
+          persist-credentials: false
+      - name: Download verified installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
+        run: |
+          set -euo pipefail
+          VERSION=$(jq -r .version package.json)
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-preview\.[0-9]+$ ]]
+          test "$(jq -r .version src/edition.json)" = "$VERSION"
+          test "$(jq -r .version plugins/openclaw/package.json)" = "$VERSION"
+          test -f "docs/releases/v$VERSION.md"
+          gh run download "$BUILD_RUN_ID" --name unsigned-macOS --dir artifacts/macOS
+          gh run download "$BUILD_RUN_ID" --name unsigned-Windows --dir artifacts/Windows
           mkdir release
-          find artifacts -maxdepth 2 -type f \( -name '*.dmg' -o -name '*.exe' \) -exec cp {} release/ \;
-          test "$(find release -name '*.dmg' | wc -l)" -ge 1
-          test "$(find release -name '*.exe' | wc -l)" -ge 2
+          cp "artifacts/macOS/CLI Account Switch-$VERSION-mac-universal.dmg" release/
+          cp "artifacts/Windows/CLI Account Switch-$VERSION-win-x64-setup.exe" release/
+          cp "artifacts/Windows/CLI Account Switch-$VERSION-win-x64-portable.exe" release/
           (cd release && sha256sum *.dmg *.exe > SHA256SUMS.txt)
       - name: Publish prerelease
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
         run: |
           set -euo pipefail
-          cat > notes.md <<'EOF'
-          ## CLI Account Switch — Preview 7
-
-          Local Claude Code and Codex profiles, shared skills and instructions, persistent managed tasks, session resume, and a local web dashboard.
-
-          ### Downloads
-          - macOS: universal DMG (Apple Silicon and Intel).
-          - Windows: NSIS setup and portable executables.
-          - SHA256SUMS.txt: installer checksums.
-
-          ### Before installing
-          - Preview software; installers are unsigned and macOS is not notarized.
-          - Install the official Claude Code / Codex CLIs separately and sign in with your own accounts.
-          - Windows managed task execution is not supported. Windows build/basic checks are not full runtime validation.
-          - Usage comes from local records and may be stale. Switching profiles affects new launches only.
-          - Scriptable imagery is a design preview; widget code and its server are not included.
-
-          Built from `95d218129e2012d008617af9c87614eab42d4243` in successful workflow run #37403067283. macOS runtime/UI tests and Windows basic tests/build passed.
-
-          MIT License. See README.md and README.ko.md for setup and limitations.
-          EOF
-          gh release create v0.2.0-preview.7 release/* --target 95d218129e2012d008617af9c87614eab42d4243 --title 'CLI Account Switch v0.2.0-preview.7' --notes-file notes.md --prerelease
+          VERSION=$(jq -r .version package.json)
+          cp "docs/releases/v$VERSION.md" notes.md
+          printf '\nBuild: `%s` — https://github.com/%s/actions/runs/%s\n' "$EXPECTED_SHA" "$GH_REPO" "$BUILD_RUN_ID" >> notes.md
+          gh release create "v$VERSION" release/* --target "$EXPECTED_SHA" --title "CLI Account Switch v$VERSION" --notes-file notes.md --prerelease

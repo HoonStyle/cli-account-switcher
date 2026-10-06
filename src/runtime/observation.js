@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const active = new Set(['starting', 'running', 'unknown']);
 const terminal = new Set(['succeeded', 'failed', 'cancelled']);
+const ended = new Set([...terminal, 'blocked']);
 const timestamp = value => Number.isFinite(value) && value > 0 ? value : null;
 const latestTime = values => Math.max(0, ...values.filter(Number.isFinite)) || null;
 function liveReceipt(a) {
@@ -36,12 +37,12 @@ function attemptObservation(a, root, allAttempts, { now, staleMs, maxActive }) {
     else if (occupied.length >= maxActive) waitReason = 'capacity';
     else waitReason = 'scheduler';
   } else if (a.state === 'external_wait') waitReason = 'coordinator';
-  const failure = a.state === 'failed' ? error('execution', a.result?.reason || (a.result?.state === 'succeeded' ? 'invalid_child_result' : 'Execution failed; see attempt logs'), a.result?.exit)
+  const failure = a.state === 'blocked' ? error('preflight', a.result?.reason || 'Preparation failed') : a.state === 'failed' ? error('execution', a.result?.reason || (a.result?.state === 'succeeded' ? 'invalid_child_result' : 'Execution failed; see attempt logs'), a.result?.exit)
     : a.state === 'external_wait' && a.lastWakeError ? error('coordinator_wake', a.lastWakeError) : null;
   const startedAt = timestamp(a.startedAt), endedAt = timestamp(a.endedAt);
   return { state: a.state, activity, heartbeatStatus, heartbeatAt, lastOutputAt, lastProgressAt, quiet,
     waitReason, error: failure, createdAt: timestamp(a.createdAt), startedAt, endedAt,
-    elapsedMs: startedAt && (!terminal.has(a.state) || endedAt) ? Math.max(0, (endedAt || now) - startedAt) : null };
+    elapsedMs: startedAt && (!ended.has(a.state) || endedAt) ? Math.max(0, (endedAt || now) - startedAt) : null };
 }
 function observe(root, tasks, attempts, allAttempts, options) {
   const observedAttempts = attempts.map(a => ({ ...a, observation: attemptObservation(a, root, allAttempts, options) }));
@@ -54,7 +55,7 @@ function observe(root, tasks, attempts, allAttempts, options) {
       activity: terminal.has(executionState) ? executionState : last?.observation.activity || executionState,
       latestAttemptId: last?.id || null, reviewDecision: t.review?.decision || null, error: failure } };
   });
-  const counts = { total: tasks.length, queued: 0, running: 0, succeeded: 0, failed: 0, cancelled: 0, unknown: 0, reviewPending: 0 };
+  const counts = { total: tasks.length, queued: 0, running: 0, succeeded: 0, failed: 0, blocked: 0, cancelled: 0, unknown: 0, reviewPending: 0 };
   for (const t of observedTasks) {
     const state = t.observation.activity === 'unknown' ? 'unknown' : t.observation.executionState;
     const key = ['starting', 'running'].includes(state) ? 'running' : state;

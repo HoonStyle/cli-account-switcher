@@ -14,6 +14,10 @@ async function run(argv) {
   if (['list', 'health'].includes(command)) { console.log(JSON.stringify(await request(command), null, 2)); return; }
   if (['get', 'cancel'].includes(command)) { console.log(JSON.stringify(await request(command, { id: rest[0] }), null, 2)); return; }
   if (command === 'respond') { console.log(JSON.stringify(await request('respond', { id: rest[0], message: rest.slice(1).join(' ') }), null, 2)); return; }
+  if (command === 'resume') {
+    if (rest.length !== 2) throw Error('tasks resume <id> <request.json>');
+    console.log(JSON.stringify(await request('resume', { id: rest[0], request: JSON.parse(fs.readFileSync(rest[1], 'utf8')) }), null, 2)); return;
+  }
   if (command === 'ack') { console.log(JSON.stringify(await request('ack', { id: rest[0], version: Number(rest[1]) }), null, 2)); return; }
   if (command === 'result') {
     const detail = await request('get', { id: rest[0] });
@@ -21,6 +25,6 @@ async function run(argv) {
     await new Promise((resolve, reject) => process.stdout.write(detail.root.finalResponse + '\n', e => e ? reject(e) : resolve()));
     await request('ack', { id: detail.root.id, version: detail.root.finalVersion }); return;
   }
-  console.log('cli-accounts tasks start|health|list|submit <spec.json>|get <id>|result <id>|cancel <id>|respond <id> <text>|ack <id> <version>');
+  console.log('cli-accounts tasks start|health|list|submit <spec.json>|get <id>|result <id>|cancel <id>|respond <id> <text>|resume <id> <request.json>|ack <id> <version>');
 }
 module.exports = { run };

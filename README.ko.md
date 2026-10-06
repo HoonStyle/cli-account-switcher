@@ -20,7 +20,7 @@
 
 CLI Account Switch는 Claude Code와 Codex CLI의 여러 로컬 계정 프로필을 관리하는 Electron 데스크톱 앱입니다. 프로필마다 설정 홈을 분리하고, 선택한 프로필로 공식 CLI를 실행합니다. 로그인과 모델 요청은 사용자가 설치한 공식 CLI가 처리합니다.
 
-> **Preview** — 현재 버전은 `0.2.0-preview.7`입니다. 서명·공증된 설치 파일은 아직 제공하지 않습니다. Windows 빌드 설정은 포함되어 있으나 Windows에서 관리형 작업 실행은 지원하지 않습니다.
+> **Preview** — 현재 버전은 `0.2.0-preview.8`입니다. 서명·공증된 설치 파일은 아직 제공하지 않습니다. Windows 빌드 설정은 포함되어 있으나 Windows에서 관리형 작업 실행은 지원하지 않습니다. [릴리스 노트](docs/releases/v0.2.0-preview.8.md).
 
 ## 화면 미리보기
 
@@ -87,7 +87,7 @@ npm ci
 npm start
 ```
 
-저장소가 비공개인 동안에는 접근 권한이 필요합니다.
+빌드된 프리뷰 설치 파일은 [GitHub Releases](https://github.com/HoonStyle/cli-account-switcher/releases)에서 받을 수 있습니다.
 
 ### 첫 실행
 
@@ -160,6 +160,12 @@ cli-accounts add codex isolated --no-share
 
 작업 기록에는 프롬프트·프로젝트 경로·출력이 포함될 수 있으므로 런타임 디렉터리를 공개 저장소에 올리지 마십시오.
 
+### 실행 정책과 복구
+
+`executionPolicy`의 기본값은 `edit-only`입니다. 쓰기 가능한 Claude 작업에서 `build-test`를 명시하면 macOS에서 제한된 빌드·테스트 명령을 실행할 수 있습니다. 지원되는 샌드박스 옵션이 있는 Claude Code 2.1.290 이상과 해당 SDK가 필요하며, 업데이트만으로 기존 작업의 권한이 확대되지는 않습니다.
+
+실행 전 준비 단계에서 중단된 작업은 재시도·라운드 한도 안에서 재개할 수 있습니다. 후속 위임에는 이전 작업 공간의 파일을 결과 버전과 함께 명시적으로 전달할 수 있으며, 원본 프로젝트에 자동 병합하지 않습니다.
+
 ## 웹 대시보드
 
 앱과 같은 작업 관리 화면을 로컬 브라우저에서도 사용할 수 있습니다. 소스 디렉터리에서 실행합니다.
@@ -210,6 +216,8 @@ openclaw plugins install ./plugins/openclaw
 - 플러그인 매니페스트의 최소 OpenClaw 버전은 **2026.9.6**입니다. 실제 설치 버전과의 API 호환성은 별도 확인이 필요합니다.
 - 플러그인은 앱의 데이터 디렉터리를 사용합니다. 동일한 플러그인·도구 ID를 가진 플러그인을 중복 설치하지 마십시오.
 - 작업 결과 전달에는 명시적인 확인이 필요합니다. 전송과 확인 사이의 결과가 불명확한 경우 정확히 한 번 전달을 보장하지 않습니다.
+- `account_tasks get`은 짧은 요약을 반환합니다. 전체 근거는 `context`, `task`, `final` 보기에서 반환된 `nextOffset`과 `queryRevision`으로 이어 읽으십시오. 요약만으로 검토를 완료하지 않습니다.
+- 대시보드는 읽기 전용 Gateway 조회로 최근 OpenClaw 활동을 별도로 표시합니다. 연결이 끊긴 기록은 이전 기록으로 표시하며, 실행 종료를 사용자 목표 완료로 간주하지 않습니다.
 
 ## 개발 및 빌드
 
@@ -239,7 +247,7 @@ npm run dist:win   # Windows NSIS 설치 파일 및 portable 빌드
 
 [검증·빌드 워크플로](.github/workflows/ci.yml)는 `main` push와 pull request에서 macOS·Windows 기본 테스트 및 플러그인 빌드를 실행합니다. macOS에서는 런타임·대시보드·렌더러 테스트도 실행합니다.
 
-수동 실행(`workflow_dispatch`) 시 설치 파일을 빌드하고 아티팩트를 7일간 보관합니다. 워크플로는 GitHub Release를 게시하거나 태그를 푸시하지 않습니다. 서명·공증과 Windows 런타임 검증은 별도 작업입니다.
+수동 실행(`workflow_dispatch`) 시 설치 파일을 빌드하고 아티팩트를 7일간 보관합니다. 별도 [게시 워크플로](.github/workflows/publish-release.yml)에 성공한 빌드 실행 ID와 정확한 커밋 SHA를 전달하면 출처를 검증한 뒤 설치 파일·체크섬을 프리릴리스로 게시합니다. 서명·공증과 Windows 런타임 검증은 별도 작업입니다.
 
 ## 제한사항
 

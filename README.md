@@ -20,7 +20,7 @@ Local profiles · CLI launches · Usage records · Managed tasks
 
 CLI Account Switch is an Electron desktop app for managing multiple local Claude Code and Codex CLI profiles. It separates configuration homes and launches each official CLI with the selected profile. The official CLIs handle sign-in and model requests.
 
-> **Preview** — Current version: `0.2.0-preview.7`. Signed and notarized installers are not yet available. Windows build configuration is included, but managed task execution on Windows is not supported.
+> **Preview** — Current version: `0.2.0-preview.8`. Signed and notarized installers are not yet available. Windows build configuration is included, but managed task execution on Windows is not supported. [Release notes](docs/releases/v0.2.0-preview.8.md).
 
 ## Screenshots
 
@@ -87,7 +87,7 @@ npm ci
 npm start
 ```
 
-Repository access is required while the repository remains private.
+Prebuilt preview installers are available from [GitHub Releases](https://github.com/HoonStyle/cli-account-switcher/releases).
 
 ### First launch
 
@@ -160,6 +160,12 @@ This preserves **managed task context**. It does not collect every terminal conv
 
 Task records can contain prompts, project paths, and output. Do not commit the runtime directory to a public repository.
 
+### Execution and recovery
+
+`executionPolicy` defaults to `edit-only`. Explicit `build-test` permission for a writable Claude task enables restricted build/test commands on macOS; it requires Claude Code 2.1.290+ with the supported sandbox flags and the relevant SDK. Installing an update does not upgrade existing task permissions.
+
+Tasks paused before execution can be resumed with bounded retry/round limits. Follow-up delegations can explicitly receive versioned files from earlier task worktrees; those changes are not automatically merged into the original project.
+
 ## Web dashboard
 
 Use the same task-management interface in a local browser. From the source directory:
@@ -210,6 +216,8 @@ openclaw plugins install ./plugins/openclaw
 - The plugin manifest requires OpenClaw **2026.9.6** or later. Verify API compatibility with your installed version.
 - The plugin uses the app's data directory. Do not install duplicate plugins with the same plugin or tool IDs.
 - Result delivery requires explicit acknowledgment. An ambiguous send/ack boundary does not guarantee exactly-once delivery.
+- `account_tasks get` returns a compact summary. Read `context`, `task`, or `final` pages using the returned `nextOffset` and `queryRevision`; summaries are not complete review evidence.
+- The dashboard can separately show recent OpenClaw activity through read-only Gateway queries. Offline records are marked stale, and an observed execution ending does not imply the user's goal is complete.
 
 ## Development
 
@@ -239,7 +247,7 @@ Artifacts are written to `dist/`. Build on the corresponding operating system. m
 
 The [verification and build workflow](.github/workflows/ci.yml) runs basic tests and plugin builds on macOS and Windows for pushes to `main` and pull requests. macOS also runs runtime, dashboard, and renderer tests.
 
-Manual dispatch (`workflow_dispatch`) builds installers and retains artifacts for seven days. The workflow does not publish GitHub Releases or push tags. Signing, notarization, and Windows runtime validation remain separate tasks.
+Manual dispatch (`workflow_dispatch`) builds installers and retains artifacts for seven days. The separate [publish workflow](.github/workflows/publish-release.yml) takes the successful build run ID and exact commit SHA, verifies provenance, and publishes a prerelease with installer checksums. Signing, notarization, and Windows runtime validation remain separate tasks.
 
 ## Limitations
 

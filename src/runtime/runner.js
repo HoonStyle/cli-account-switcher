@@ -5,6 +5,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const { launchEnv, validateBinding } = require('../launch/profile-resolver');
 const { parseOutput } = require('../adapters/cli');
+const { executionEnv } = require('./execution-policy');
 const { STDOUT_LIMIT, STDERR_LIMIT } = require('./output');
 const dir = process.argv[2];
 function save(name, value) {
@@ -15,7 +16,7 @@ function save(name, value) {
   try { const directory = fs.openSync(dir, 'r'); try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); } } catch {}
 }
 (async () => {
-  let child, timer, cancelled = false, cancelAt = 0, outputOverflow = false;
+  let child, timer, exitReceipt, processStarted = false, phase = 'preflight', cancelled = false, cancelAt = 0, outputOverflow = false;
   const claim = path.join(dir, 'claimed');
   try { fs.closeSync(fs.openSync(claim, 'wx', 0o600)); } catch { process.exitCode = 2; return; }
   const spec = JSON.parse(fs.readFileSync(path.join(dir, 'spec.json'), 'utf8'));
@@ -23,11 +24,12 @@ function save(name, value) {
   try {
     if (fs.existsSync(path.join(dir, 'cancel.request'))) { save('result.json', { ...resultBase, state: 'cancelled', reason: 'cancelled_before_spawn' }); return; }
     validateBinding(spec.binding);
-    const env = launchEnv(spec.binding);
+    const env = executionEnv(spec.invocation, launchEnv(spec.binding));
     delete env.ELECTRON_RUN_AS_NODE;
     // Do not leak service internals or delegate mutation authority through environment.
     delete env.CLI_ACCOUNTS_SOCKET;
     child = spawn(spec.invocation.executable, spec.invocation.args, { cwd: spec.cwd, env, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
+    child.once('spawn', () => { processStarted = true; phase = 'execution'; });
     const heartbeat = () => {
       save('live.json', { ...resultBase, runnerPid: process.pid, childPid: child.pid, at: Date.now(), lastOutputAt, lastProgressAt });
       save('terminal.json', { ...resultBase, at: lastOutputAt, stdout: stdout.slice(-STDOUT_LIMIT), stderr: stderr.slice(-STDERR_LIMIT), truncated: stdout.length > STDOUT_LIMIT || stderr.length > STDERR_LIMIT });
@@ -58,6 +60,7 @@ function save(name, value) {
     const ended = new Promise((resolve, reject) => { child.once('error', reject); child.once('close', (code, signal) => resolve({ code, signal })); });
     child.stdin.end(spec.prompt);
     const exit = await ended;
+    exitReceipt = exit;
     heartbeat(); // Preserve final activity even for executions shorter than 1s.
     // Do not release an account/worktree while descendants in our process group remain.
     const groupAlive = () => { if (process.platform === 'win32' || !child.pid) return false; try { process.kill(-child.pid, 0); return true; } catch { return false; } };
@@ -71,14 +74,36 @@ function save(name, value) {
     fs.writeFileSync(path.join(dir, 'stdout.log'), stdout, { mode: 0o600 });
     fs.writeFileSync(path.join(dir, 'stderr.log'), stderr, { mode: 0o600 });
     if (cancelled) save('result.json', { ...resultBase, state: 'cancelled', exit });
-    else if (exit.code !== 0 || outputOverflow) save('result.json', { ...resultBase, state: 'failed', exit, reason: outputOverflow ? 'output_limit' : 'cli_exit' });
+    else if (exit.code !== 0 || outputOverflow) save('result.json', { ...resultBase, state: 'failed', failurePhase: 'execution', processStarted, exit, reason: outputOverflow ? 'output_limit' : 'cli_exit' });
     else {
+      phase = 'parse';
       const parsed = parseOutput(spec.binding.tool, stdout, spec.invocation);
       if (!parsed.sessionId) throw new Error('Missing CLI session receipt');
       if (JSON.stringify(parsed.result).length > 200000) throw new Error('Structured result exceeds 200KB limit');
       if (spec.invocation.expectedSession && parsed.sessionId !== spec.invocation.expectedSession) throw new Error('Session receipt mismatch');
-      save('result.json', { ...resultBase, state: 'succeeded', exit, ...parsed });
+      save('result.json', { ...resultBase, state: 'succeeded', processStarted, exit, ...parsed });
     }
-  } catch (e) { save('result.json', { ...resultBase, state: 'failed', reason: e.message }); }
+  } catch (e) {
+    // A PID is already evidence of a launch even if an immediate storage error
+    // happened before Node delivered the asynchronous spawn event.
+    processStarted ||= !!child?.pid;
+    clearInterval(timer);
+    // A post-spawn preparation/storage fault must not release the account while
+    // a silently running CLI or descendant can still modify its worktree.
+    if (processStarted && child?.pid) {
+      const target = process.platform === 'win32' ? child.pid : -child.pid;
+      const alive = () => { try { process.kill(target, 0); return true; } catch (error) { if (error.code === 'ESRCH') return false; throw error; } };
+      if (alive()) {
+        try { process.kill(target, 'SIGTERM'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+        const start = Date.now();
+        while (alive() && Date.now() - start < 10000) {
+          if (Date.now() - start > 5000) { try { process.kill(target, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; } }
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        if (alive()) throw Error('Runner fault: process termination remains unconfirmed');
+      }
+    }
+    save('result.json', { ...resultBase, state: processStarted ? 'failed' : 'blocked', failurePhase: processStarted && phase === 'preflight' ? 'execution' : phase, processStarted, ...(exitReceipt ? { exit: exitReceipt } : {}), reason: e.message });
+  }
   finally { clearInterval(timer); }
 })().catch(e => { process.stderr.write(e.message + '\n'); process.exitCode = 1; });

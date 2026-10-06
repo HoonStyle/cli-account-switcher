@@ -36,7 +36,7 @@ const engine = new Engine(dir, { attention: r => {
 } });
 let timer, stopping = false;
 const methods = {
-  health: () => ({ status: 'ok', pid: process.pid, version: 1, appVersion: require('../edition.json').version, edition: require('../edition.json').name, capabilities: { claude: 'requires-runtime-verification', codex: 'requires-runtime-verification', openclaw: 'plugin-bridge', managedDepth: 1, modelSelection: true } }),
+  health: () => ({ status: 'ok', pid: process.pid, version: 1, appVersion: require('../edition.json').version, edition: require('../edition.json').name, capabilities: { claude: 'requires-runtime-verification', codex: 'requires-runtime-verification', openclaw: 'plugin-bridge', managedDepth: 1, modelSelection: true, artifactInputs: true, boundedResume: true, claudeBuildTest: true } }),
   bridgeBind: p => engine.bindOpenClaw(p), bridgePulse: () => engine.db.put('meta', { id: 'bridge-health', at: engine.now() }),
   bridgeAllBindings: () => engine.db.all('bridge').filter(b => !b.suspended),
   bridgeBindings: () => engine.now() - (engine.db.get('meta', 'bridge-health')?.at || 0) < 15000 ? engine.db.all('bridge').filter(b => !b.suspended) : [],
@@ -44,9 +44,9 @@ const methods = {
   bridgeSuspend: p => engine.suspendOpenClaw(p.bindingId, p.reason),
   bridgeGet: p => { engine.authorizeOpenClaw(p.id, p.owner); return engine.get(p.id); },
   bridgeDecide: p => engine.openClawDecide(p.id, p.owner, p.attemptId, p.generation, p.decision),
-  bridgeAction: p => { engine.authorizeOpenClaw(p.id, p.owner); if (!['cancel', 'respond', 'ack'].includes(p.action)) throw new Error('Invalid bridge action'); return engine[p.action](p.id, p.action === 'respond' ? p.message : p.version); },
+  bridgeAction: p => { engine.authorizeOpenClaw(p.id, p.owner); if (!['cancel', 'respond', 'resume', 'ack'].includes(p.action)) throw new Error('Invalid bridge action'); return engine[p.action](p.id, p.action === 'respond' ? p.message : p.action === 'resume' ? p.request : p.version, p.owner); },
   submit: p => engine.submit(p), list: () => engine.list(), get: p => engine.get(p.id), output: p => engine.output(p.id, p.attemptId),
-  cancel: p => engine.cancel(p.id), respond: p => engine.respond(p.id, p.message), ack: p => engine.ack(p.id, p.version),
+  cancel: p => engine.cancel(p.id), respond: p => engine.respond(p.id, p.message), resume: p => engine.resume(p.id, p.request), ack: p => engine.ack(p.id, p.version),
 };
 const server = net.createServer(connection => {
   let buffer = '', bytes = 0, handled = false;
