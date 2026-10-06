@@ -25,6 +25,19 @@ app.whenReady().then(async()=>{
  try{
   await win.loadFile(path.resolve(__dirname,'../src/renderer/tasks.html'));await pause(120);
   const run=code=>win.webContents.executeJavaScript(`(async()=>{${code}})()`);
+  // A CI display can constrain native window resizing. Exercise Chromium's
+  // actual viewport/media queries, independently of the host screen size.
+  const viewport=async(width,height)=>{
+    win.webContents.enableDeviceEmulation({screenPosition:'desktop',screenSize:{width,height},viewPosition:{x:0,y:0},deviceScaleFactor:0,viewSize:{width,height},scale:1});
+    let actual;
+    for(let attempt=0;attempt<40;attempt++){
+      actual=await run(`return {width:innerWidth,height:innerHeight,mobile:matchMedia('(max-width:680px)').matches};`);
+      if(actual.width===width&&actual.height===height&&actual.mobile===(width<=680))return;
+      await pause(50);
+    }
+    assert.fail(`viewport ${width}x${height} did not settle: ${JSON.stringify(actual)}`);
+  };
+  await viewport(1200,1100);
   let result=await run(`const $=id=>document.getElementById(id);return {open:$('create-task').open,cards:$('delegations').children.length,body:$('delegations').textContent,final:$('final').hidden,ack:$('ack').hidden,injected:!!window.injected};`);
   check(!result.open && result.cards===4,'task-first dashboard and visible delegation cards');
   const race=await run(`const old=window.fixture.get(), latest=JSON.parse(JSON.stringify(old)); latest.root.status='failed'; window.fixture.queue([{delay:50,detail:old},{delay:5,detail:latest}]); await Promise.all([showDetail('demo'),showDetail('demo')]); return document.getElementById('detail-status').textContent;`);
@@ -57,7 +70,7 @@ app.whenReady().then(async()=>{
   check(await run(`return !document.getElementById('list-empty').hidden;`),'search empty state');
   await run(`document.getElementById('filter-all').click();window.fixture.set(${JSON.stringify(initial)});await refresh();`);
   for(const width of [390,375,800,1200]){
-    win.setContentSize(width,width===800 ? 450 : 1000);await pause(80);
+    await viewport(width,width===800 ? 450 : 1000);
     check(await run(`return document.documentElement.scrollWidth<=innerWidth;`),`no horizontal overflow at ${width}`);
     if(width===390){
       await run(`syncTaskIndex(false);`);

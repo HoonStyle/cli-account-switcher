@@ -65,7 +65,7 @@
     "test/runtime-service.js": "deaac07212809c95380ce66c73741083e6e4ecfb77a6d013f42d55f4e05d83b4",
     "test/runtime.js": "57f01addbf79293fffbb36756287a24314eb4d0bcc028538ecb3678b48b54759",
     "test/smoke.js": "4168ccc555e8270433b18aeec2e1c2a805c36a98c25d63f67be069eed6e07e00",
-    "test/tasks-status-ui.js": "933355d23325b6b59821ba54de2affcbff2bbb0203d5403da08ad0787696c4e1",
+    "test/tasks-status-ui.js": "b0cf11e4b44fc44b2227d168623d3d227ba0c887773b5e435402b4a1c507c667",
     "test/tasks-terminal-ui.js": "26ca1c124c1768ab36fbf1eef4aab3e37741ddb84dff1dd4fb95ed9e922fee4f",
     "test/tasks-ui.js": "712e8ab00a03d4c8c44f57d4b1fc2592771906664ff35301281f2c84151898b9"
   }
