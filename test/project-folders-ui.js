@@ -19,7 +19,16 @@ app.whenReady().then(async()=>{
     await run(`$('project').value='';$('choose-project').click();`);await pause(30);assert(await run(`return $('folder-dialog').open&&$('folder-list').children.length===2;`));
     await run(`$('folder-search').value='한글';$('folder-search').dispatchEvent(new Event('input'));`);assert.equal(await run(`return $('folder-list').children.length;`),1);
     await run(`$('folder-list').firstChild.click();`);await pause(30);assert.equal(await run(`return $('folder-path').textContent;`),'/host/한글 프로젝트 #1');
-    await run(`$('folder-select').click();`);await pause(20);assert(await run(`return !$('folder-dialog').open&&$('project').value==='/host/한글 프로젝트 #1'&&document.activeElement===$('choose-project');`));
+    await run(`$('folder-select').click();`);
+    // Dialog close/focus restoration is queued by Chromium; wait for the
+    // observable state instead of assuming a CI renderer settles in 20 ms.
+    let selected;
+    for(let attempt=0;attempt<100;attempt++){
+     selected=await run(`return {open:$('folder-dialog').open,value:$('project').value,focus:document.activeElement.id};`);
+     if(!selected.open&&selected.value==='/host/한글 프로젝트 #1'&&selected.focus==='choose-project')break;
+     await pause(20);
+    }
+    assert(!selected.open&&selected.value==='/host/한글 프로젝트 #1'&&selected.focus==='choose-project',JSON.stringify(selected));
     await run(`$('choose-project').click();`);await pause(20);await run(`$('folder-up').click();`);await pause(20);await run(`$('folder-cancel').click();`);assert.equal(await run(`return $('project').value;`),'/host/한글 프로젝트 #1');
     await run(`window.fixture.fail(true);$('choose-project').click();`);await pause(20);assert(await run(`return !$('folder-error').hidden&&$('folder-select').disabled;`));
     await run(`window.fixture.fail(false);$('folder-roots').firstChild.click();`);await pause(20);assert(await run(`return $('folder-error').hidden&&!$('folder-select').disabled;`));
