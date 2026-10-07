@@ -20,7 +20,7 @@
 
 CLI Account Switch는 Claude Code와 Codex CLI의 여러 로컬 계정 프로필을 관리하는 Electron 데스크톱 앱입니다. 프로필마다 설정 홈을 분리하고, 선택한 프로필로 공식 CLI를 실행합니다. 로그인과 모델 요청은 사용자가 설치한 공식 CLI가 처리합니다.
 
-> **Preview** — 현재 버전은 `0.2.0-preview.8`입니다. 서명·공증된 설치 파일은 아직 제공하지 않습니다. Windows 빌드 설정은 포함되어 있으나 Windows에서 관리형 작업 실행은 지원하지 않습니다. [릴리스 노트](docs/releases/v0.2.0-preview.8.md).
+> **Preview** — 현재 버전은 `0.2.0-preview.9`입니다. 서명·공증된 설치 파일은 아직 제공하지 않습니다. Windows 빌드 설정은 포함되어 있으나 Windows에서 관리형 작업 실행은 지원하지 않습니다. [릴리스 노트](docs/releases/v0.2.0-preview.9.md).
 
 ## 화면 미리보기
 
@@ -219,7 +219,7 @@ openclaw plugins install ./plugins/openclaw
 - `account_tasks get`은 짧은 요약을 반환합니다. 전체 근거는 `context`, `task`, `final` 보기에서 반환된 `nextOffset`과 `queryRevision`으로 이어 읽으십시오. 요약만으로 검토를 완료하지 않습니다.
 - 대시보드는 읽기 전용 Gateway 조회로 최근 OpenClaw 활동을 별도로 표시합니다. 연결이 끊긴 기록은 이전 기록으로 표시하며, 실행 종료를 사용자 목표 완료로 간주하지 않습니다.
 
-### 미배포 런타임 계약 변경
+### preview.9 런타임 계약 변경
 
 - 실행·검토·사용자 입력 요청·전달은 별도 상태입니다. 버전이 있는 `inputRequest`에 중단 원인을 보존하므로 실행 경고가 이를 덮어쓰지 않습니다. 원 소유 대화에 필요한 입력을 안내하고 실제 전달을 확인한 뒤 정확한 `attentionVersion`으로 `ack_attention`합니다. 실제 작업은 명시적 응답이나 제한된 `resume`으로만 재개합니다.
 - 도구의 작업 `state`는 화면과 동일한 관측 실행 상태이며, `ledgerState`는 저장된 스케줄링 상태입니다. 상세 이력은 최신 500건을 시간순으로 보여줍니다.
