@@ -390,10 +390,14 @@ class Engine {
       }
     }
     for (const r of this.db.all('root')) {
-      const attempts = this.attempts(r.id);
       // Only diagnostic warnings are reconciled. Input requests have an
       // independent lifetime and are never interpreted as warning strings.
       const warning = /^(?:progress_gap|runner_unknown|spawn_ambiguous|slot_wait|receipt_conflict):(.+)$/.exec(r.attention || '');
+      // Only these roots consume attempts in this pass. Loading every large
+      // receipt again for each completed/review-waiting root can make one tick
+      // exceed its interval and starve bounded read requests on slower hosts.
+      if (!warning && !['cancel_requested', 'running'].includes(r.status)) continue;
+      const attempts = this.attempts(r.id);
       if (warning && attempts.some(a => a.id === warning[1] && (terminal.has(a.state) || a.state === 'blocked'))) this.clearAttention(r, [r.attention]);
       if (r.status === 'cancel_requested') {
         if (!attempts.some(a => active.has(a.state))) { r.status = 'cancelled'; r.attention = null; this.saveRoot(r); }
