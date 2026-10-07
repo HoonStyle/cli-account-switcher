@@ -4,7 +4,8 @@ const fs = require('fs'), os = require('os'), path = require('path'), net = requ
 const assert = require('assert/strict');
 const { randomUUID } = require('crypto');
 const { spawn, spawnSync } = require('child_process');
-const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'switch-transport-')));
+// realpath adds /private on macOS; reserve space for accounts/runtime/service.sock.
+const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'rt-')));
 process.env.CLI_ACCOUNTS_ROOT = path.join(tmp, 'accounts');
 process.env.CLI_ACCOUNTS_NO_NOTIFICATIONS = '1';
 const client = require('../src/runtime/client');

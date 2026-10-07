@@ -4,7 +4,8 @@
 const assert = require('assert/strict');
 const fs = require('fs'), os = require('os'), path = require('path');
 const { spawn } = require('child_process'), { createHash } = require('crypto');
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'query-contracts-'));
+// Leave room for macOS CI's /private/var/folders TMPDIR and Unix socket limit.
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qc-'));
 process.env.HOME = tmp; process.env.USERPROFILE = tmp;
 process.env.CLI_ACCOUNTS_ROOT = path.join(tmp, 'accounts');
 process.env.CLI_ACCOUNTS_NO_NOTIFICATIONS = '1';
@@ -18,6 +19,18 @@ const bytes = value => Buffer.byteLength(JSON.stringify(value), 'utf8');
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const owner = { agentId: 'fixture', sessionKey: 'agent:fixture:aggregate', sessionId: 'fixture-session' };
 let service, engine = new Engine(client.dir);
+let phase = 'loading query projector';
+const startedAt = Date.now();
+function checkpoint(name) {
+  phase = name;
+  console.log(`query fixture: ${phase} (${Date.now() - startedAt}ms)`);
+}
+const deadline = setTimeout(() => {
+  console.error(`Query fixture deadline exceeded during ${phase}`);
+  // This child is owned by this isolated fixture, never a production service.
+  service?.kill('SIGKILL');
+  process.exit(1);
+}, 120000);
 function ledgerDigest() {
   const db = new DatabaseSync(path.join(client.dir, 'tasks.sqlite'), { readOnly: true });
   try {
@@ -43,9 +56,10 @@ async function start() {
   let diagnostics = '';
   service = spawn(process.execPath, [path.resolve(__dirname, '../src/runtime/service.js')], { env: process.env, stdio: ['ignore', 'ignore', 'pipe'] });
   service.stderr.on('data', data => { diagnostics = (diagnostics + data).slice(-8192); });
+  service.on('error', error => { diagnostics = error.message; });
   for (let i = 0; i < 100; i++) {
     try { if ((await client.request('health')).pid === service.pid) return; } catch {}
-    if (service.exitCode !== null) throw Error(`Isolated service exited: ${diagnostics}`);
+    if (service.exitCode !== null || service.signalCode !== null) throw Error(`Isolated service exited (${service.exitCode ?? service.signalCode}): ${diagnostics}`);
     await sleep(30);
   }
   throw Error(`Isolated service startup timed out: ${diagnostics}`);
@@ -85,6 +99,7 @@ async function legacyFallbackContracts() {
 }
 (async () => { try {
   const { projectQuery, MAX_REPLY_BYTES } = await import('../plugins/openclaw/task-query.mjs');
+  checkpoint('seeding isolated ledger');
   const binding = engine.bindOpenClaw(owner);
   const participant = { id: 'p1', tool: 'claude', home: path.join(tmp, 'unused-profile'), executable: process.execPath };
   const root = { id: 'aggregate', coordinator: { tool: 'openclaw', bindingId: binding.id, ...owner }, participants: [participant], permission: 'read-only', executionPolicy: 'edit-only', projectPath: tmp, goal: 'bounded aggregate fixture', generation: 1, status: 'running', attention: null, round: 3, maxRounds: 3, finalVersion: 0 };
@@ -121,7 +136,9 @@ async function legacyFallbackContracts() {
   for (const view of ['summary', 'tasks', 'task', 'final']) engine.querySource(root.id, { view, taskId: 'task-0' });
   engine.prompt = originalPrompt; engine.db.eventsTail = originalEvents;
   engine.db.close(); engine = null;
+  checkpoint('starting isolated service');
   await start();
+  checkpoint('reading bounded task pages');
   let queries = 0, maxEnvelopeBytes = 0;
   async function query(params = {}, queryOwner = owner) {
     const response = await client.request('bridgeQuery', { id: root.id, owner: queryOwner, query: { action: 'get', ...params } });
@@ -161,6 +178,7 @@ async function legacyFallbackContracts() {
   assert.equal(restored.result.summary, expectedSummaries[0]); assert.equal(restored.result.success, true);
   assert.equal(restored.id, 'task-0'); assert(!JSON.stringify(restored).includes('token-0'));
   const firstContext = await query({ view: 'context' });
+  checkpoint('reading context and dashboard');
   for (const offset of [0, Math.floor(firstContext.page.total / 2), Math.max(0, firstContext.page.total - 1200)]) {
     const params = { action: 'get', view: 'context', offset, queryRevision: firstContext.page.queryRevision };
     const actual = await query(params), expected = projectQuery(contextSource, params);
@@ -191,6 +209,7 @@ async function legacyFallbackContracts() {
   console.log(`PASS local 65536-character task/context reconstruction, compact dashboard detail, and ${rawListBytes}-byte root list projected to ${bytes(dashboardList)} bytes`);
 
   const finalResponse = '한글😀 결과\n'.repeat(22000);
+  checkpoint('reviewing and reading final pages');
   await client.request('bridgeDecide', { id: root.id, owner, attemptId: review.id, generation: 1, decision: { kind: 'complete', summary: 'fixture reviewed', delegations: [], reviews: taskIds.map(taskId => ({ taskId, resultVersion: 1, decision: 'accepted', reason: 'fixture reviewed' })), finalResponse } });
   await assert.rejects(query({ view: 'context', offset: firstContext.page.nextOffset, queryRevision: firstContext.page.queryRevision }), /Query changed/);
   await assert.rejects(query({ view: 'task', taskId: 'task-0', resultVersion: 1, offset: firstTaskPage.nextOffset, queryRevision: firstTaskPage.queryRevision }), /Query changed/);
@@ -206,8 +225,10 @@ async function legacyFallbackContracts() {
   assert.equal(ledgerDigest(), beforeFinalRead);
   console.log(`PASS changed task/context revisions force restart, exact full Unicode final reconstruction without ack; ${queries} bounded responses, largest ${maxEnvelopeBytes} bytes`);
   await stop(); await legacyFallbackContracts();
+  checkpoint('finished');
   console.log('PASS dashboard detail/list fallback only on exact legacy unknown method; budget/transport errors and full-content query failures never fall back');
 } finally {
+  clearTimeout(deadline);
   if (engine) engine.db.close();
   await stop(); fs.rmSync(tmp, { recursive: true, force: true });
 } })().catch(error => { console.error(error); process.exitCode = 1; });

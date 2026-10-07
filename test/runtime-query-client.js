@@ -3,7 +3,8 @@
 // service projector: malformed pages must never become partial review evidence.
 const fs = require('fs'), os = require('os'), path = require('path'), net = require('net');
 const assert = require('assert/strict');
-process.env.CLI_ACCOUNTS_ROOT = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'query-client-')), 'accounts');
+// Keep sockets within macOS limits even with a canonical /private/var TMPDIR.
+process.env.CLI_ACCOUNTS_ROOT = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'qcli-')), 'accounts');
 const client = require('../src/runtime/client');
 const { queryReply, LOCAL_QUERY_OPTIONS } = require('../src/runtime/query');
 fs.mkdirSync(client.dir, { recursive: true });
