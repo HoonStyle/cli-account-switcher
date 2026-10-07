@@ -1,7 +1,7 @@
 'use strict';
 const fs = require('fs');
 const { randomUUID } = require('crypto');
-const { request, ensureService } = require('./client');
+const { request, ensureService, readDashboard } = require('./client');
 async function run(argv) {
   const [command, ...rest] = argv;
   if (command === 'start') { console.log(JSON.stringify(await ensureService(), null, 2)); return; }
@@ -20,8 +20,8 @@ async function run(argv) {
   }
   if (command === 'ack') { console.log(JSON.stringify(await request('ack', { id: rest[0], version: Number(rest[1]) }), null, 2)); return; }
   if (command === 'result') {
-    const detail = await request('get', { id: rest[0] });
-    if (!['ready', 'completed'].includes(detail.root.status)) throw new Error(`Result not ready: ${detail.root.status} / ${detail.root.attention || ''}`);
+    const detail = await readDashboard(rest[0]);
+    if (!['ready', 'completed'].includes(detail.root.status)) throw new Error(`Result not ready: ${detail.root.status} / ${detail.root.status === 'needs_user' ? detail.root.inputRequest?.reason || detail.root.attention || '' : detail.root.attention || ''}`);
     await new Promise((resolve, reject) => process.stdout.write(detail.root.finalResponse + '\n', e => e ? reject(e) : resolve()));
     await request('ack', { id: detail.root.id, version: detail.root.finalVersion }); return;
   }

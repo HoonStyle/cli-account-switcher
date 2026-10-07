@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('api', {
   tasksBindings: () => ipcRenderer.invoke('tasksBindings'),
   tasksList: () => ipcRenderer.invoke('tasksList'),
   tasksGet: (id) => ipcRenderer.invoke('tasksGet', id),
+  tasksTaskDetail: (id, taskId, resultVersion, queryRevision) => ipcRenderer.invoke('tasksTaskDetail', id, taskId, resultVersion, queryRevision),
   tasksExternalList: () => ipcRenderer.invoke('tasksExternalList'),
   tasksExternalGet: (id) => ipcRenderer.invoke('tasksExternalGet', id),
   tasksOutput: (id, attemptId) => ipcRenderer.invoke('tasksOutput', id, attemptId),

@@ -18,6 +18,12 @@ function liveReceipt(a) {
 function error(kind, message, exit) {
   return { kind, message: String(message || kind).slice(0, 1000), exitCode: exit?.code ?? null, signal: exit?.signal ?? null };
 }
+// Attempts arrive in durable ledger insertion order. Wall-clock timestamps are
+// telemetry, never execution identity: they can tie or move backward on resume.
+function currentTaskAttempt(task, attempts) {
+  const candidates = attempts.filter(a => a.taskId === task.id && a.rootId === task.rootId);
+  return task.currentAttemptId ? candidates.find(a => a.id === task.currentAttemptId) || null : candidates.at(-1) || null;
+}
 function attemptObservation(a, root, allAttempts, { now, staleMs, maxActive }) {
   const live = liveReceipt(a), heartbeatAt = timestamp(live?.at);
   const lastOutputAt = timestamp(live?.lastOutputAt), lastProgressAt = timestamp(live?.lastProgressAt);
@@ -47,8 +53,7 @@ function attemptObservation(a, root, allAttempts, { now, staleMs, maxActive }) {
 function observe(root, tasks, attempts, allAttempts, options) {
   const observedAttempts = attempts.map(a => ({ ...a, observation: attemptObservation(a, root, allAttempts, options) }));
   const observedTasks = tasks.map(t => {
-    // Ledger insertion order breaks equal-millisecond ties deterministically.
-    const last = observedAttempts.filter(a => a.taskId === t.id).reduce((previous, a) => !previous || (a.createdAt || 0) >= (previous.createdAt || 0) ? a : previous, null);
+    const last = currentTaskAttempt(t, observedAttempts);
     const executionState = terminal.has(t.state) ? t.state : last?.observation.state || t.state;
     const failure = executionState === 'failed' ? last?.observation.error || error('task_result', t.result?.summary || 'Task reported failure') : last?.observation.error || null;
     return { ...t, observation: { ...(last?.observation || {}), state: executionState, executionState,
@@ -65,12 +70,13 @@ function observe(root, tasks, attempts, allAttempts, options) {
   const errors = observedTasks.filter(t => t.observation.error).map(t => ({ taskId: t.id, attemptId: t.observation.latestAttemptId, ...t.observation.error }));
   for (const a of observedAttempts.filter(a => a.role === 'main' && a.observation.error)) errors.push({ attemptId: a.id, ...a.observation.error });
   if (root.lastDeliveryWakeError) errors.push(error('delivery_wake', root.lastDeliveryWakeError));
+  if (root.status === 'needs_user' && root.attentionDelivery === 'pending' && root.lastAttentionWakeError) errors.push(error('attention_wake', root.lastAttentionWakeError));
   const observation = { phase: root.status, counts, activeAttemptIds: attempts.filter(a => active.has(a.state)).map(a => a.id),
     heartbeatAt: latestTime(observedAttempts.map(a => a.observation.heartbeatAt)),
     lastOutputAt: latestTime(observedAttempts.map(a => a.observation.lastOutputAt)),
     errors, requiresAttention: !!root.attention || root.status === 'needs_user' || counts.unknown > 0 ||
       (!['ready', 'completed', 'cancelled'].includes(root.status) && (observedTasks.some(t => t.observation.error && !t.review) || observedAttempts.some(a => a.state === 'external_wait' && a.observation.error))),
-    attentionReason: root.attention || null, deliveryStatus: root.finalDelivery || 'pending', observedAt: options.now };
+    attentionReason: (root.status === 'needs_user' ? root.inputRequest?.reason : null) || root.attention || null, deliveryStatus: root.finalDelivery || 'pending', observedAt: options.now };
   return { root: { ...root, observation }, tasks: observedTasks, attempts: observedAttempts };
 }
-module.exports = { observe };
+module.exports = { observe, currentTaskAttempt };

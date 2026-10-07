@@ -121,7 +121,7 @@ function eventCount(id,type){return e.get(id).events.filter(x=>x.type===type).le
  for(const goal of ['BAD_REVIEW','FAIL_CHILD']) {
  const r=submit(goal);await until(()=>e.root(r.id).status==='needs_user');
  assert.equal(e.root(r.id).finalVersion,0);assert.equal(e.root(r.id).finalResponse,null);
- assert.match(e.root(r.id).attention,goal==='BAD_REVIEW'?/invalid_review_reference/:/cannot_accept_failed_execution/);
+ assert.match(e.root(r.id).inputRequest.reason,goal==='BAD_REVIEW'?/invalid_review_reference/:/cannot_accept_failed_execution/);
  if(goal==='FAIL_CHILD')assert.equal(e.tasks(r.id)[0].state,'failed');
  }
  console.log('PASS malformed review and failed child cannot become final success');

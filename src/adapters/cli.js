@@ -57,7 +57,14 @@ function parseOutput(tool, stdout, invocation) {
   const events = stdout.split(/\r?\n/).filter(Boolean).map(s => { try { return JSON.parse(s); } catch { return {}; } });
   if (events.some(e => e.type === 'turn.failed' || e.type === 'error')) throw new Error('Codex turn failed; inspect private attempt logs');
   const sessionId = events.find(e => e.type === 'thread.started')?.thread_id || invocation.expectedSession;
-  const text = fs.existsSync(invocation.outputFile) ? fs.readFileSync(invocation.outputFile, 'utf8') : events.filter(e => e.type === 'item.completed' && e.item?.type === 'agent_message').at(-1)?.item.text;
+  let text;
+  if (fs.existsSync(invocation.outputFile)) {
+    try { text = new TextDecoder('utf-8', { fatal: true }).decode(fs.readFileSync(invocation.outputFile)); }
+    catch (error) {
+      if (error.code === 'ERR_ENCODING_INVALID_ENCODED_DATA') throw new Error('Invalid UTF-8 in Codex result file', { cause: error });
+      throw error;
+    }
+  } else text = events.filter(e => e.type === 'item.completed' && e.item?.type === 'agent_message').at(-1)?.item.text;
   return { sessionId, result: parseJSON(text || '') };
 }
 module.exports = { mainSchema, childSchema, buildInvocation, parseOutput };

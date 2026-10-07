@@ -19,6 +19,14 @@ class Ledger {
   put(kind, item) { this.db.prepare('INSERT INTO records VALUES(?,?,?) ON CONFLICT(kind,id) DO UPDATE SET body=excluded.body').run(kind, item.id, JSON.stringify(item)); return item; }
   event(rootId, type, body = {}) { this.db.prepare('INSERT INTO events(rootId,at,type,body) VALUES(?,?,?,?)').run(rootId, Date.now(), type, JSON.stringify(body)); }
   events(rootId, after = 0) { return this.db.prepare('SELECT * FROM events WHERE rootId=? AND seq>? ORDER BY seq LIMIT 500').all(rootId, after).map(r => ({ ...r, body: JSON.parse(r.body) })); }
+  // Snapshots need the newest window, not the first forward-cursor page. Return
+  // chronological order for renderers; `before` pages backward without overlap.
+  eventsTail(rootId, before = null) {
+    const rows = before == null
+      ? this.db.prepare('SELECT * FROM events WHERE rootId=? ORDER BY seq DESC LIMIT 500').all(rootId)
+      : this.db.prepare('SELECT * FROM events WHERE rootId=? AND seq<? ORDER BY seq DESC LIMIT 500').all(rootId, before);
+    return rows.reverse().map(r => ({ ...r, body: JSON.parse(r.body) }));
+  }
   transaction(fn) { this.db.exec('BEGIN IMMEDIATE'); try { const result = fn(); this.db.exec('COMMIT'); return result; } catch (e) { this.db.exec('ROLLBACK'); throw e; } }
   close() { this.db.close(); }
 }

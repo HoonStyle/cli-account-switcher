@@ -132,7 +132,7 @@ test('suspended coordinator rejects local continuation without creating unreacha
     assert.throws(() => f.e.respond(f.root.id, 'continue'), /mismatch/);
     assert.equal(f.e.attempts(f.root.id).length, 1);
     f.e.bindOpenClaw(owner);
-    assert.equal(f.e.root(f.root.id).attention, 'input needed');
+    assert.equal(f.e.root(f.root.id).inputRequest.reason, 'input needed');
     assert.throws(() => f.e.respond(f.root.id, 'continue'), /mismatch/);
     f.e.respond(f.root.id, 'continue', owner); assert.equal(f.e.openClawPending().length, 1);
   } finally { f.close(); }
@@ -163,6 +163,7 @@ async function harness(f) {
     if (method === 'bridgeWake') return e.openClawWake(p.id, p.attemptId, p.error, p.finalVersion);
     if (method === 'submit') return e.submit(p);
     e.authorizeOpenClaw(p.id, p.owner);
+    if (method === 'bridgeQuery') return require('../src/runtime/query').queryReply(e.querySource(p.id, p.query), { ...p.query, action:'get' });
     if (method === 'bridgeGet') return e.get(p.id);
     if (method === 'bridgeDecide') return e.openClawDecide(p.id, p.owner, p.attemptId, p.generation, p.decision);
     if (method === 'bridgeAction') return e[p.action](p.id, p.action === 'respond' ? p.message : p.version);

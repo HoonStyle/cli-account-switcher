@@ -43,10 +43,22 @@ const assert = require('node:assert/strict');
   assert.equal(JSON.parse(mutation.content[0].text).root.status, 'awaiting_review');
   assert.equal(JSON.parse(mutation.content[0].text).observationIncluded, false);
   assert.equal(JSON.parse(mutation.content[0].text).counts, undefined, 'root-only mutation receipt must not falsely report zero children');
+  value.root.status = 'needs_user'; value.root.attention = 'runner_unknown:other-attempt';
+  value.root.attentionVersion = 2; value.root.attentionDelivery = 'pending';
+  value.root.inputRequest = { kind: 'coordinator', reason: large, summary: large, sourceAttemptId: 'input-main', generation: 1, version: 2, createdAt: 123,
+    blockedTasks: [{ taskId: 'blocked', attemptId: 'blocked-attempt', reason: large, token: 'SECRET' }], token: 'SECRET' };
+  const inputSummary = reply({}).root;
+  assert(inputSummary.inputRequest.reasonTruncated); assert(inputSummary.inputRequest.summaryTruncated);
+  assert.equal(inputSummary.inputRequest.version, 2); assert.equal(inputSummary.inputRequest.blockedCount, 1);
+  const inputContext = JSON.parse(reconstruct({ view: 'context' }));
+  assert.equal(inputContext.inputRequest.reason, large); assert.equal(inputContext.inputRequest.blockedTasks[0].reason, large);
+  assert.equal(inputContext.attention.reason, large); assert.equal(inputContext.attention.diagnosticReason, 'runner_unknown:other-attempt');
+  assert.equal(inputContext.attention.summary, large); assert.equal(inputContext.attention.version, 2);
   // JSON escaping can expand ASCII to six bytes; the envelope itself is bounded.
   value.root.finalResponse = '\u0000'.repeat(5000);
   reply({ view: 'final' });
   value.root.participants[0].profileId = large;
   const omitted = reply({}); assert.equal(omitted.responseOmitted, true); assert.equal(omitted.pending[0].id, 'pending');
+  assert.equal(omitted.attentionVersion, 2); assert.equal(omitted.attentionDelivery, 'pending');
   console.log('PASS bounded oversized summary, pending contract IDs, exact Unicode result/context/final reconstruction, task-list pagination, version guards, token exclusion, no mutation, escaped payload budget');
 })().catch(error => { console.error(error); process.exitCode = 1; });

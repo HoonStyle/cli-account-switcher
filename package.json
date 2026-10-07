@@ -6,10 +6,10 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "test": "node test/smoke.js && node test/distribution.js",
+    "test": "node test/smoke.js && node test/distribution.js && node test/usage-hook.js",
     "dist:mac": "electron-builder --mac --universal",
     "dist:win": "electron-builder --win",
-    "test:runtime": "node test/profile-launch.js && node test/runtime-artifacts.js && node test/runtime-recovery.js && node test/runtime-execution-policy.js && node test/runtime.js && node test/runtime-observation.js && node test/runtime-models.js && node test/runtime-output.js && node test/runtime-faults.js && node test/runtime-service.js && node test/runtime-review-contracts.js && node test/openclaw-bridge.js && node test/openclaw-basics.js && node test/openclaw-query.js && node test/rpc-unicode.js && node test/openclaw-service.js",
+    "test:runtime": "node test/profile-launch.js && node test/runtime-artifacts.js && node test/runtime-recovery.js && node test/runtime-execution-policy.js && node test/runtime.js && node test/runtime-observation.js && node test/runtime-models.js && node test/runtime-output.js && node test/runtime-events.js && node test/runtime-query-contracts.js && node test/runtime-query-client.js && node test/runtime-state-contracts.js && node test/runtime-transport-contracts.js && node test/runtime-faults.js && node test/runtime-service.js && node test/runtime-review-contracts.js && node test/openclaw-bridge.js && node test/openclaw-basics.js && node test/openclaw-query.js && node test/rpc-unicode.js && node test/openclaw-service.js",
     "build:plugin": "node scripts/build-openclaw-plugin.js",
     "test:dashboard": "node test/model-catalog.js && node test/dashboard.js && node test/openclaw-dashboard.js && electron test/tasks-ui.js && electron test/tasks-status-ui.js && electron test/tasks-terminal-ui.js && electron test/project-folders-ui.js && electron test/openclaw-ui.js",
     "test:reset-ui": "electron test/reset-credits-ui.js"

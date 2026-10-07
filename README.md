@@ -219,6 +219,14 @@ openclaw plugins install ./plugins/openclaw
 - `account_tasks get` returns a compact summary. Read `context`, `task`, or `final` pages using the returned `nextOffset` and `queryRevision`; summaries are not complete review evidence.
 - The dashboard can separately show recent OpenClaw activity through read-only Gateway queries. Offline records are marked stale, and an observed execution ending does not imply the user's goal is complete.
 
+### Unreleased runtime contract changes
+
+- Execution, review, user-input requests, and delivery are separate states. A versioned `inputRequest` preserves the blocker independently of runner warnings. After reporting it to the bound conversation and verifying delivery, use `ack_attention` with that exact `attentionVersion`; only an explicit response or bounded `resume` continues the work.
+- Tool task `state` uses the same execution observation as the dashboard; `ledgerState` retains the persisted scheduling state. Detail history contains the latest 500 events in chronological order.
+- Paging happens in the service, before RPC transmission. The dashboard uses bounded previews and restores complete task evidence on expansion, pinned to the same result revision. OpenClaw and the local UI share one projector; truncated previews are not treated as complete evidence. Current execution is selected by its persisted attempt ID, not the wall clock.
+- Mutations require a same-connection protocol handshake. Mixed client/service versions are rejected before applying changes, without restarting active work. RPC requests are limited to 1 MiB including the full UTF-8 JSON envelope and newline; oversized requests are rejected before mutation. Shorten and retry the same task/attempt/generation, not a new task.
+- Normal split UTF-8 output is preserved. Invalid stdout or authoritative result-file encoding fails the execution instead of silently storing repaired text as a successful result. The raw diagnostic `get`/`list` RPCs retain an 8 MiB response limit; normal dashboard and OpenClaw reads use the bounded read APIs.
+
 ## Development
 
 ### Tests

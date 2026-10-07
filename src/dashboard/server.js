@@ -3,6 +3,7 @@ const http = require('http'), fs = require('fs'), path = require('path');
 const { submission, text } = require('../runtime/submission');
 const store = require('../store');
 const client = require('../runtime/client');
+const { isReadOnly } = require('../runtime/transport');
 const { modelCatalog } = require('../model-catalog');
 const { createFolderBrowser } = require('../project-folders');
 
@@ -16,7 +17,7 @@ function createDashboard({ port = 18473, publicOrigin, runtime = client, account
   const hosts = new Set([...origins].map(o => new URL(o).host));
   const assets = new Map([['/', 'tasks.html'], ['/tasks.js', 'tasks.js'], ['/tasks-web.js', 'tasks-web.js']]);
   const json = (res, status, value) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(value)); };
-  const rpc = async (method, params) => { await runtime.ensureService(); return runtime.request(method, params); };
+  const rpc = async (method, params) => { await runtime.ensureService({ readOnly: isReadOnly(method) }); return runtime.request(method, params); };
   const server = http.createServer(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -50,11 +51,22 @@ function createDashboard({ port = 18473, publicOrigin, runtime = client, account
         }
         if (url.pathname === '/api/health') return json(res, 200, await rpc('health'));
         if (url.pathname === '/api/bindings') return json(res, 200, await rpc('bridgeBindings'));
-        if (url.pathname === '/api/tasks') return json(res, 200, await rpc('list'));
+        if (url.pathname === '/api/tasks') { await runtime.ensureService({ readOnly: true }); return json(res, 200, await runtime.readDashboardList()); }
+        const taskDetail = url.pathname.match(/^\/api\/tasks\/([^/]+)\/details\/([^/]+)$/);
+        if (taskDetail) {
+          const id = text(decodeURIComponent(taskDetail[1]), 'task ID', 200), taskId = text(decodeURIComponent(taskDetail[2]), 'child task ID', 200);
+          const resultVersion = Number(url.searchParams.get('resultVersion')), queryRevision = text(url.searchParams.get('queryRevision'), 'query revision', 200);
+          if (!Number.isSafeInteger(resultVersion) || resultVersion < 0) throw Error('Invalid result version');
+          return json(res, 200, await runtime.readQueryPages(id, { view:'task', taskId, resultVersion, queryRevision }));
+        }
         const output = url.pathname.match(/^\/api\/tasks\/([^/]+)\/attempts\/([^/]+)\/output$/);
         if (output) return json(res, 200, await rpc('output', { id: text(decodeURIComponent(output[1]), 'task ID', 200), attemptId: text(decodeURIComponent(output[2]), 'attempt ID', 200) }));
         const match = url.pathname.match(/^\/api\/tasks\/([^/]+)$/);
-        if (match) return json(res, 200, await rpc('get', { id: text(decodeURIComponent(match[1]), 'task ID', 200) }));
+        if (match) {
+          const id = text(decodeURIComponent(match[1]), 'task ID', 200);
+          await runtime.ensureService({ readOnly: true });
+          return json(res, 200, await runtime.readDashboard(id));
+        }
       } else if (req.method === 'POST') {
         if (!req.headers.origin || !origins.has(req.headers.origin)) return json(res, 403, { error: 'Same-origin POST required' });
         if (!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] || '')) return json(res, 415, { error: 'JSON required' });
@@ -90,7 +102,7 @@ async function run(args) {
     else throw Error('dashboard [--port 18473] [--public-origin https://host]');
   }
   if (!Number.isInteger(port) || port < 1024 || port > 65535) throw Error('Invalid dashboard port');
-  await client.ensureService();
+  await client.ensureService({ readOnly: true });
   const server = createDashboard({ port, publicOrigin });
   server.on('error', e => { console.error(e.message); process.exitCode = 1; });
   server.listen(port, '127.0.0.1', () => console.log(`CLI Account Switch dashboard: http://127.0.0.1:${port}`));

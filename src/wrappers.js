@@ -5,6 +5,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const { randomUUID } = require('crypto');
 const P = require('./paths');
 const store = require('./store');
 
@@ -231,35 +232,92 @@ function registerPath() {
   return { file: rc, line, backup: cur ? rc + '.bak-cli-accounts' : null, note: '새로 여는 터미널부터 적용됩니다.' };
 }
 
+function readUsageSettings() {
+  const settingsFile = path.join(P.DEFAULT_HOME.claude, 'settings.json');
+  let stat;
+  try { stat = fs.lstatSync(settingsFile); }
+  catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    return { file: settingsFile, settings: {}, exists: false, mode: 0o600 };
+  }
+  // Preserve a user's settings symlink rather than replacing it on rename.
+  const file = stat.isSymbolicLink() ? fs.realpathSync(settingsFile) : settingsFile;
+  const text = fs.readFileSync(file, 'utf8');
+  let settings;
+  try { settings = JSON.parse(text); }
+  catch (cause) { throw new Error(`Cannot update Claude settings: invalid JSON in ${settingsFile}`, { cause }); }
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) throw new Error(`Cannot update Claude settings: expected a JSON object in ${settingsFile}`);
+  return { file, settings, exists: true, mode: fs.statSync(file).mode & 0o777 };
+}
+
+// Stage a complete replacement beside the target. Backups are never overwritten,
+// and neither a write failure nor a failed rename can truncate existing settings.
+function stageUsageSettings(snapshot, settings) {
+  const { file, mode } = snapshot;
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const tmp = `${file}.tmp-${randomUUID()}`;
+  let fd, backup = null;
+  const discard = () => { try { fs.unlinkSync(tmp); } catch (error) { if (error.code !== 'ENOENT') throw error; } };
+  try {
+    fd = fs.openSync(tmp, 'wx', mode);
+    fs.writeFileSync(fd, JSON.stringify(settings, null, 2));
+    fs.fchmodSync(fd, mode);
+    fs.fsyncSync(fd);
+    fs.closeSync(fd); fd = undefined;
+    if (snapshot.exists) {
+      backup = file + '.bak-cli-accounts';
+      try { fs.copyFileSync(file, backup, fs.constants.COPYFILE_EXCL); }
+      catch (error) {
+        if (error.code !== 'EEXIST') throw error;
+        backup += `-${randomUUID()}`;
+        fs.copyFileSync(file, backup, fs.constants.COPYFILE_EXCL);
+      }
+    }
+    return { backup, commit: () => fs.renameSync(tmp, file), discard };
+  } catch (error) {
+    if (fd !== undefined) fs.closeSync(fd);
+    discard();
+    throw error;
+  }
+}
+
 // Hook the status line so Claude Code's rate_limits JSON gets persisted per profile.
 function enableUsageHook() {
-  const settingsFile = path.join(P.DEFAULT_HOME.claude, 'settings.json');
-  let settings = {};
-  try { settings = JSON.parse(fs.readFileSync(settingsFile, 'utf8')); } catch {}
+  const snapshot = readUsageSettings(), settings = snapshot.settings;
   const hook = path.join(P.BIN_DIR, 'claude-statusline-cache.js');
   const hookCmd = `node "${hook}"`;
-  const state = store.load();
+  const previousState = store.load(), state = { ...previousState };
   const cur = settings.statusLine;
   if (cur && cur.command === hookCmd) return { alreadyEnabled: true };
-  if (cur && cur.type === 'command') state.statusLineOriginal = { command: cur.command };
-  store.save(state);
-  fs.copyFileSync(settingsFile, settingsFile + '.bak-cli-accounts');
+  state.statusLineOriginal = cur && cur.type === 'command' ? { ...cur } : null;
   settings.statusLine = { type: 'command', command: hookCmd, padding: cur && cur.padding != null ? cur.padding : 0, refreshInterval: (cur && cur.refreshInterval) || 30 };
-  fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2));
-  return { alreadyEnabled: false, original: state.statusLineOriginal, backup: settingsFile + '.bak-cli-accounts' };
+  const staged = stageUsageSettings(snapshot, settings);
+  try {
+    // Persist the original command before activating a hook that reads it.
+    store.save(state);
+    staged.commit();
+  } catch (error) {
+    // save() may have updated state.json before failing on one of its mirrors.
+    try { store.save(previousState); }
+    catch (rollbackError) { error.rollbackError = rollbackError; }
+    throw error;
+  } finally { staged.discard(); }
+  return { alreadyEnabled: false, original: state.statusLineOriginal, backup: staged.backup };
 }
 
 function disableUsageHook() {
-  const settingsFile = path.join(P.DEFAULT_HOME.claude, 'settings.json');
-  let settings = {};
-  try { settings = JSON.parse(fs.readFileSync(settingsFile, 'utf8')); } catch {}
+  const snapshot = readUsageSettings(), settings = snapshot.settings;
+  const hookCmd = `node "${path.join(P.BIN_DIR, 'claude-statusline-cache.js')}"`;
+  if (settings.statusLine?.command !== hookCmd) return { alreadyDisabled: true };
   const state = store.load();
   if (state.statusLineOriginal && state.statusLineOriginal.command) {
-    settings.statusLine = { ...(settings.statusLine || {}), type: 'command', command: state.statusLineOriginal.command };
+    settings.statusLine = { type: 'command', ...state.statusLineOriginal };
   } else {
     delete settings.statusLine;
   }
-  fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2));
+  const staged = stageUsageSettings(snapshot, settings);
+  try { staged.commit(); } finally { staged.discard(); }
+  return { alreadyDisabled: false, backup: staged.backup };
 }
 
 function usageHookStatus() {

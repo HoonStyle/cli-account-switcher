@@ -5,18 +5,25 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'switch-rpc-unicode-'));
 process.env.HOME = tmp; process.env.CLI_ACCOUNTS_ROOT = path.join(tmp, 'accounts');
 process.env.CLI_ACCOUNTS_NO_NOTIFICATIONS = '1';
 const client = require('../src/runtime/client');
+const { TRANSPORT, HELLO_METHOD, PROTOCOL_VERSION } = require('../src/runtime/transport');
 fs.mkdirSync(client.dir, { recursive: true });
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function splitRequest(method, params, marker) {
   return new Promise((resolve, reject) => {
-    const c = net.createConnection(client.socket); c.setEncoding('utf8'); let result = '';
+    const c = net.createConnection(client.socket); c.setEncoding('utf8'); let result = '', negotiated = false;
     c.setTimeout(3000, () => c.destroy(new Error('split request timed out')));
-    c.on('error', reject); c.on('data', chunk => { result += chunk; });
+    c.on('error', reject); c.on('data', chunk => {
+      result += chunk;
+      if (!negotiated && result.includes('\n')) {
+        assert.deepEqual(JSON.parse(result).result, TRANSPORT); negotiated = true; result = '';
+        const bytes = Buffer.from(JSON.stringify({ method, params }) + '\n');
+        const cut = bytes.indexOf(Buffer.from(marker)) + 1;
+        c.write(bytes.subarray(0, cut)); setTimeout(() => c.end(bytes.subarray(cut)), 30);
+      }
+    });
     c.on('end', () => { try { resolve(JSON.parse(result)); } catch (e) { reject(e); } });
     c.on('connect', () => {
-      const bytes = Buffer.from(JSON.stringify({ method, params }) + '\n');
-      const cut = bytes.indexOf(Buffer.from(marker)) + 1;
-      c.write(bytes.subarray(0, cut)); setTimeout(() => c.end(bytes.subarray(cut)), 30);
+      c.write(JSON.stringify({ method: HELLO_METHOD, params: { protocolVersion: PROTOCOL_VERSION } }) + '\n');
     });
   });
 }
@@ -24,13 +31,28 @@ let failed = 0;
 async function test(name, run) { try { await run(); console.log(`PASS ${name}`); } catch (e) { failed++; console.error(`FAIL ${name}: ${e.message}`); } }
 (async () => {
   const expected = '가나다🙂한글 결과';
-  const fake = net.createServer(c => c.once('data', () => {
+  const fake = net.createServer(c => c.on('data', data => {
+    const method = JSON.parse(data).method;
+    if (method === HELLO_METHOD) { c.write(JSON.stringify({ result: TRANSPORT }) + '\n'); return; }
+    if (method === 'server-limit') {
+      c.end(JSON.stringify({ error: 'fixture request rejected before application', code: 'ERR_TASK_REQUEST_TOO_LARGE', details: { requestBytes: 1234, maxBytes: 1000 } }) + '\n');
+      return;
+    }
     const bytes = Buffer.from(JSON.stringify({ result: expected }) + '\n');
     const cut = bytes.indexOf(Buffer.from('가')) + 1;
     c.write(bytes.subarray(0, cut)); setTimeout(() => c.end(bytes.subarray(cut)), 30);
   }));
   await new Promise(resolve => fake.listen(client.socket, resolve));
-  try { await test('client preserves UTF-8 across split response bytes', async () => assert.equal(await client.request('fixture'), expected)); }
+  try {
+    await test('client preserves UTF-8 across split response bytes', async () => assert.equal(await client.request('fixture'), expected));
+    await test('client preserves structured remote error code and byte metadata', async () => {
+      await assert.rejects(client.request('server-limit'), error => {
+        assert.equal(error.code, 'ERR_TASK_REQUEST_TOO_LARGE');
+        assert.equal(error.requestBytes, 1234); assert.equal(error.maxBytes, 1000);
+        assert.equal(error.message, 'fixture request rejected before application'); return true;
+      });
+    });
+  }
   finally { await new Promise(resolve => fake.close(resolve)); }
   const service = spawn(process.execPath, [path.resolve(__dirname, '../src/runtime/service.js')], { env: process.env, stdio: 'ignore' });
   try {
@@ -46,5 +68,5 @@ async function test(name, run) { try { await run(); console.log(`PASS ${name}`);
   } finally {
     if (service.exitCode === null) await new Promise(resolve => { service.once('exit', resolve); service.kill('SIGTERM'); });
   }
-  console.log(JSON.stringify({ passed: 2 - failed, failed, total: 2 })); process.exitCode = failed ? 1 : 0;
+  console.log(JSON.stringify({ passed: 3 - failed, failed, total: 3 })); process.exitCode = failed ? 1 : 0;
 })().catch(e => { console.error(e); process.exitCode = 1; });

@@ -278,7 +278,7 @@ function taskSender(event) {
 }
 async function taskRequest(method, params = {}) {
   const client = require('./runtime/client');
-  await client.ensureService();
+  await client.ensureService({ readOnly: require('./runtime/transport').isReadOnly(method) });
   return client.request(method, params);
 }
 ipcMain.handle('openTasks', () => openTasksWindow());
@@ -288,11 +288,23 @@ ipcMain.handle('tasksChooseProject', async (event, current) => {
 });
 ipcMain.handle('tasksStart', async (event) => { taskSender(event); return taskRequest('health'); });
 ipcMain.handle('tasksBindings', async (event) => { taskSender(event); return taskRequest('bridgeBindings'); });
-ipcMain.handle('tasksList', async (event) => { taskSender(event); return taskRequest('list'); });
+ipcMain.handle('tasksList', async (event) => {
+  taskSender(event); const client = require('./runtime/client');
+  await client.ensureService({ readOnly: true }); return client.readDashboardList();
+});
 const openclawMonitor = require('./dashboard/openclaw').createOpenClawMonitor();
 ipcMain.handle('tasksExternalList', async (event) => { taskSender(event); return openclawMonitor.list(); });
 ipcMain.handle('tasksExternalGet', async (event, id) => { taskSender(event); return openclawMonitor.get(taskText(id, 'OpenClaw 기록 ID', 100)); });
-ipcMain.handle('tasksGet', async (event, id) => { taskSender(event); return taskRequest('get', { id: taskText(id, '작업 ID', 200) }); });
+ipcMain.handle('tasksGet', async (event, id) => {
+  taskSender(event); const client = require('./runtime/client');
+  await client.ensureService({ readOnly: true });
+  return client.readDashboard(taskText(id, '작업 ID', 200));
+});
+ipcMain.handle('tasksTaskDetail', async (event, id, taskId, resultVersion, queryRevision) => {
+  taskSender(event);
+  if (!Number.isSafeInteger(resultVersion) || resultVersion < 0) throw Error('결과 버전이 올바르지 않습니다.');
+  return require('./runtime/client').readQueryPages(taskText(id, '작업 ID', 200), { view: 'task', taskId: taskText(taskId, '위임 작업 ID', 200), resultVersion, queryRevision: taskText(queryRevision, '조회 버전', 200) });
+});
 ipcMain.handle('tasksOutput', async (event, id, attemptId) => { taskSender(event); return taskRequest('output', { id: taskText(id, '작업 ID', 200), attemptId: taskText(attemptId, '실행 ID', 200) }); });
 function mutableTaskId(id) { const value=taskText(id, '작업 ID', 200); if(value.startsWith('oc-'))throw Error('OpenClaw 기록은 읽기 전용입니다.'); return value; }
 ipcMain.handle('tasksCancel', async (event, id) => { taskSender(event); return taskRequest('cancel', { id: mutableTaskId(id) }); });

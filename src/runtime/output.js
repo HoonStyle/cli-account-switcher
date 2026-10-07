@@ -1,6 +1,14 @@
 'use strict';
 const fs = require('fs'), path = require('path');
 const STDOUT_LIMIT = 65536, STDERR_LIMIT = 16384;
+function utf8Tail(text, limit) {
+  if (Buffer.byteLength(text, 'utf8') <= limit) return text;
+  const bytes = Buffer.from(text, 'utf8');
+  let start = bytes.length - limit;
+  // Retain a byte-bounded tail without starting inside a UTF-8 code point.
+  while (start < bytes.length && (bytes[start] & 0xc0) === 0x80) start++;
+  return bytes.subarray(start).toString('utf8');
+}
 function fileText(file, limit, tail = false) {
   let fd;
   try {
@@ -11,7 +19,9 @@ function fileText(file, limit, tail = false) {
     const start = tail ? Math.max(0, stat.size - limit) : 0;
     const buffer = Buffer.alloc(Math.min(stat.size, limit));
     const length = fs.readSync(fd, buffer, 0, buffer.length, start);
-    return { text: buffer.subarray(0, length).toString('utf8'), truncated: start > 0, at: stat.mtimeMs };
+    let offset = 0;
+    if (start > 0) while (offset < length && (buffer[offset] & 0xc0) === 0x80) offset++;
+    return { text: buffer.subarray(offset, length).toString('utf8'), truncated: start > 0, at: stat.mtimeMs };
   } catch { return null; }
   finally { if (fd !== undefined) fs.closeSync(fd); }
 }
@@ -29,13 +39,16 @@ function attemptOutput(runtimeDir, attempt) {
   const live = json(path.join(expected, 'live.json'));
   if (matches(live) && Number.isInteger(live.childPid) && live.childPid > 0) empty.childPid = live.childPid;
   const output = json(path.join(expected, 'terminal.json'));
-  if (matches(output)) return { ...empty,
-    stdout: String(output.stdout || '').slice(-STDOUT_LIMIT), stderr: String(output.stderr || '').slice(-STDERR_LIMIT),
-    updatedAt: Number.isFinite(output.at) ? output.at : null, truncated: !!output.truncated };
+  if (matches(output)) {
+    const stdout = String(output.stdout || ''), stderr = String(output.stderr || '');
+    return { ...empty, stdout: utf8Tail(stdout, STDOUT_LIMIT), stderr: utf8Tail(stderr, STDERR_LIMIT),
+      updatedAt: Number.isFinite(output.at) ? output.at : null,
+      truncated: !!output.truncated || Buffer.byteLength(stdout) > STDOUT_LIMIT || Buffer.byteLength(stderr) > STDERR_LIMIT };
+  }
   // Completed runs from older versions keep their existing logs.
   const stdout = fileText(path.join(expected, 'stdout.log'), STDOUT_LIMIT, true);
   const stderr = fileText(path.join(expected, 'stderr.log'), STDERR_LIMIT, true);
   return { ...empty, stdout: stdout?.text || '', stderr: stderr?.text || '',
     updatedAt: Math.max(stdout?.at || 0, stderr?.at || 0) || null, truncated: !!(stdout?.truncated || stderr?.truncated) };
 }
-module.exports = { attemptOutput, STDOUT_LIMIT, STDERR_LIMIT };
+module.exports = { attemptOutput, STDOUT_LIMIT, STDERR_LIMIT, utf8Tail };

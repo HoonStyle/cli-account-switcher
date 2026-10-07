@@ -34,7 +34,7 @@ try {
   fix.state = 'succeeded'; fix.resultVersion = 1; e.db.put('task', fix);
   apply(r, complete([review(fix, 'accepted')]));
   assert.equal(e.root(r.id).status, 'needs_user'); assert.equal(e.root(r.id).finalVersion, 0);
-  assert.match(e.root(r.id).attention, /goal_not_fully_reviewed/);
+  assert.match(e.root(r.id).inputRequest.reason, /goal_not_fully_reviewed/);
   // Correct B independently, preserving already-resolved A's link.
   apply(r, { ...delegate([review(fix, 'accepted')], ['B']), delegations: [{ participantId: 'p1', goal: 'Fix B only', resolvesTaskIds: ['B'] }] });
   const fixB = e.tasks(r.id).find(t => t.resolvesTaskIds?.includes('B'));
@@ -49,7 +49,7 @@ try {
   const invalid = setup(), bad = task(invalid, 'bad');
   apply(invalid, delegate([review(bad, 'rejected')], ['foreign']));
   assert.equal(e.root(invalid.id).status, 'needs_user'); assert.equal(e.tasks(invalid.id).length, 1);
-  assert.match(e.root(invalid.id).attention, /invalid_followup_reference/);
+  assert.match(e.root(invalid.id).inputRequest.reason, /invalid_followup_reference/);
   console.log('PASS cross-root followup references are rejected atomically');
 
   // Throw at the last transactional write, after in-memory root/attempt mutations.

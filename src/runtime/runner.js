@@ -6,7 +6,8 @@ const { spawn } = require('child_process');
 const { launchEnv, validateBinding } = require('../launch/profile-resolver');
 const { parseOutput } = require('../adapters/cli');
 const { executionEnv } = require('./execution-policy');
-const { STDOUT_LIMIT, STDERR_LIMIT } = require('./output');
+const { STDOUT_LIMIT, STDERR_LIMIT, utf8Tail } = require('./output');
+const CAPTURE_LIMIT = 4 * 1024 * 1024, STDERR_CAPTURE_LIMIT = 131072;
 const dir = process.argv[2];
 function save(name, value) {
   const file = path.join(dir, name), tmp = file + `.${process.pid}.tmp`;
@@ -16,7 +17,7 @@ function save(name, value) {
   try { const directory = fs.openSync(dir, 'r'); try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); } } catch {}
 }
 (async () => {
-  let child, timer, exitReceipt, processStarted = false, phase = 'preflight', cancelled = false, cancelAt = 0, outputOverflow = false;
+  let child, timer, exitReceipt, processStarted = false, phase = 'preflight', cancelled = false, cancelAt = 0, outputOverflow = false, outputDecodeError = false, abortAt = 0;
   const claim = path.join(dir, 'claimed');
   try { fs.closeSync(fs.openSync(claim, 'wx', 0o600)); } catch { process.exitCode = 2; return; }
   const spec = JSON.parse(fs.readFileSync(path.join(dir, 'spec.json'), 'utf8'));
@@ -32,30 +33,46 @@ function save(name, value) {
     child.once('spawn', () => { processStarted = true; phase = 'execution'; });
     const heartbeat = () => {
       save('live.json', { ...resultBase, runnerPid: process.pid, childPid: child.pid, at: Date.now(), lastOutputAt, lastProgressAt });
-      save('terminal.json', { ...resultBase, at: lastOutputAt, stdout: stdout.slice(-STDOUT_LIMIT), stderr: stderr.slice(-STDERR_LIMIT), truncated: stdout.length > STDOUT_LIMIT || stderr.length > STDERR_LIMIT });
+      save('terminal.json', { ...resultBase, at: lastOutputAt, stdout: utf8Tail(stdout, STDOUT_LIMIT), stderr: utf8Tail(stderr, STDERR_LIMIT), truncated: stdoutBytes > STDOUT_LIMIT || stderrBytes > STDERR_LIMIT });
     };
-    let lastOutputAt = null, lastProgressAt = null, stdout = '', stderr = '', eventBuffer = '';
+    let lastOutputAt = null, lastProgressAt = null, stdout = '', stderr = '', eventBuffer = '', stdoutBytes = 0, stderrBytes = 0;
     const stop = () => { if (child.pid) { try { process.platform === 'win32' ? child.kill('SIGTERM') : process.kill(-child.pid, 'SIGTERM'); } catch {} } };
+    const abortOutput = () => { abortAt ||= Date.now(); stop(); };
     timer = setInterval(() => {
       heartbeat();
       if (!cancelled && fs.existsSync(path.join(dir, 'cancel.request'))) { cancelled = true; cancelAt = Date.now(); stop(); }
-      if (cancelled && Date.now() - cancelAt > 5000) {
+      if ((cancelled || abortAt) && Date.now() - (cancelAt || abortAt) > 5000) {
         try { process.platform === 'win32' ? child.kill('SIGKILL') : process.kill(-child.pid, 'SIGKILL'); } catch {}
       }
     }, 1000);
     heartbeat();
     const capture = (isErr, data) => {
       lastOutputAt = Date.now();
+      const bytes = Buffer.byteLength(data, 'utf8');
+      if (isErr) { stderrBytes += bytes; stderr = utf8Tail(stderr + data, STDERR_CAPTURE_LIMIT); return; }
+      stdoutBytes += bytes;
+      if (spec.binding.tool === 'claude' && spec.invocation.args.includes('stream-json')) stdout = utf8Tail(stdout + data, CAPTURE_LIMIT);
+      else if (stdoutBytes > CAPTURE_LIMIT) { outputOverflow = true; abortOutput(); return; }
+      else stdout += data;
       if (!isErr && spec.binding.tool === 'codex') {
-        eventBuffer += data.toString(); const lines = eventBuffer.split('\n'); eventBuffer = lines.pop();
+        eventBuffer += data; const lines = eventBuffer.split('\n'); eventBuffer = lines.pop();
         for (const line of lines) { try { const event = JSON.parse(line); if (['item.completed', 'turn.completed'].includes(event.type)) lastProgressAt = Date.now(); } catch {} }
       }
-      if (isErr) stderr = (stderr + data.toString()).slice(-131072);
-      else if (spec.binding.tool === 'claude' && spec.invocation.args.includes('stream-json')) stdout = (stdout + data.toString()).slice(-4 * 1024 * 1024);
-      else if (stdout.length + data.length > 4 * 1024 * 1024) { outputOverflow = true; stop(); }
-      else stdout += data.toString();
     };
-    child.stdout.on('data', d => capture(false, d)); child.stderr.on('data', d => capture(true, d));
+    // Stdout carries authoritative structured results. Preserve split code
+    // points, but never repair malformed bytes into a different success result.
+    // Stderr is diagnostic only and may use replacement characters for display.
+    const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+    const decode = data => {
+      if (outputDecodeError) return;
+      let text;
+      try { text = data === undefined ? decoder.decode() : decoder.decode(data, { stream: true }); }
+      catch { outputDecodeError = true; abortOutput(); return; }
+      if (text) capture(false, text);
+    };
+    child.stdout.on('data', data => { lastOutputAt = Date.now(); decode(data); });
+    child.stdout.on('end', () => decode()); // EOF flush must precede child close.
+    child.stderr.setEncoding('utf8'); child.stderr.on('data', data => capture(true, data));
     child.stdin.on('error', () => {});
     const ended = new Promise((resolve, reject) => { child.once('error', reject); child.once('close', (code, signal) => resolve({ code, signal })); });
     child.stdin.end(spec.prompt);
@@ -65,8 +82,8 @@ function save(name, value) {
     // Do not release an account/worktree while descendants in our process group remain.
     const groupAlive = () => { if (process.platform === 'win32' || !child.pid) return false; try { process.kill(-child.pid, 0); return true; } catch { return false; } };
     while (groupAlive()) {
-      if (cancelled) {
-        if (Date.now() - cancelAt > 5000) { try { process.kill(-child.pid, 'SIGKILL'); } catch {} }
+      if (cancelled || abortAt) {
+        if (Date.now() - (cancelAt || abortAt) > 5000) { try { process.kill(-child.pid, 'SIGKILL'); } catch {} }
         else stop();
       }
       await new Promise(r => setTimeout(r, 200));
@@ -74,12 +91,12 @@ function save(name, value) {
     fs.writeFileSync(path.join(dir, 'stdout.log'), stdout, { mode: 0o600 });
     fs.writeFileSync(path.join(dir, 'stderr.log'), stderr, { mode: 0o600 });
     if (cancelled) save('result.json', { ...resultBase, state: 'cancelled', exit });
-    else if (exit.code !== 0 || outputOverflow) save('result.json', { ...resultBase, state: 'failed', failurePhase: 'execution', processStarted, exit, reason: outputOverflow ? 'output_limit' : 'cli_exit' });
+    else if (exit.code !== 0 || outputOverflow || outputDecodeError) save('result.json', { ...resultBase, state: 'failed', failurePhase: 'execution', processStarted, exit, reason: outputDecodeError ? 'invalid_stdout_utf8' : outputOverflow ? 'output_limit' : 'cli_exit' });
     else {
       phase = 'parse';
       const parsed = parseOutput(spec.binding.tool, stdout, spec.invocation);
       if (!parsed.sessionId) throw new Error('Missing CLI session receipt');
-      if (JSON.stringify(parsed.result).length > 200000) throw new Error('Structured result exceeds 200KB limit');
+      if (JSON.stringify(parsed.result).length > 200000) throw new Error('Structured result JSON exceeds 200000 UTF-16 code units');
       if (spec.invocation.expectedSession && parsed.sessionId !== spec.invocation.expectedSession) throw new Error('Session receipt mismatch');
       save('result.json', { ...resultBase, state: 'succeeded', processStarted, exit, ...parsed });
     }

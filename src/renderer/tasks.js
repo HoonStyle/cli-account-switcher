@@ -8,8 +8,10 @@ const mainModels = new Map(), responseDrafts = new Map();
 const terminalRoots = ['completed', 'cancelled', 'failed', 'observed_ended', 'observed_idle'];
 const labels = { observed_ended:'실행 종료 · 완료 미확인', observed_idle:'대기 · 최근 실행 없음', observed_unknown:'현재 상태 미확인', observed_stale:'연결 끊김 · 이전 기록', planning:'작업 준비 중', awaiting_review:'결과 검토 중', needs_user:'답변 필요', ready:'결과 도착', cancel_requested:'중단 처리 중', queued:'순서 대기', starting:'시작 중', running:'실행 중', waiting:'응답 대기', blocked:'준비 실패', completed:'확인 완료', succeeded:'실행 완료', failed:'오류 발생', cancelled:'중단됨', pending:'대기 중', awaiting_input:'입력 대기', needs_attention:'확인 필요', unknown:'실행 확인 필요', external_wait:'총괄 응답 대기', quiet:'실행 중 · 새 출력 없음' };
 const status = value => labels[value] || '상태 확인 필요';
-const systemError = root => /^(main_result:|launch_blocked:)/.test(root.attention || '');
-const rootLabel = root => root.attention?.startsWith('launch_blocked:') ? '준비 실패' : systemError(root) ? '총괄 처리 오류' : status(root.status);
+const rootReason = root => root.status === 'needs_user' && root.inputRequest ? root.inputRequest.reason : root.attention || '';
+const inputKind = root => root.status === 'needs_user' ? root.inputRequest?.kind : null;
+const systemError = root => inputKind(root) && inputKind(root) !== 'legacy' ? ['preflight','invalid_main_result'].includes(inputKind(root)) : /^(main_result:|launch_blocked:)/.test(rootReason(root));
+const rootLabel = root => inputKind(root) === 'preflight' || (!inputKind(root) && rootReason(root).startsWith('launch_blocked:')) ? '준비 실패' : systemError(root) ? '총괄 처리 오류' : status(root.status);
 const shortGoal = (goal, limit) => goal.length > limit ? goal.slice(0,limit) + '…' : goal;
 const setText = (node, value = '') => { const text = String(value ?? ''); if (node.textContent !== text) node.textContent = text; };
 const text = (id, value) => setText($(id), value);
@@ -21,7 +23,9 @@ function badge(node, value, label) { node.className = `badge ${tone(value)}`; se
 function notice(message = '') { text('notice', message); }
 function category(root) { if (root.readOnly && root.status === 'waiting') return 'attention'; if (root.status === 'ready') return 'ready'; if (terminalRoots.includes(root.status)) return root.status === 'failed' ? 'attention' : 'done'; if (root.attention || root.observation?.requiresAttention || ['needs_user','blocked','needs_attention','observed_unknown','observed_stale'].includes(root.status)) return 'attention'; return 'active'; }
 function attentionText(root) {
-  const reason = root.attention || '';
+  const reason = rootReason(root);
+  // Coordinator prose is data, never a diagnostic code even when it shares a prefix.
+  if (inputKind(root) === 'coordinator') return root.inputRequest.summary || reason;
   if (reason.startsWith('progress_gap:')) return '최근 진행 보고가 뜸합니다. 실행 신호와 마지막 출력 시각을 아래에서 확인하세요. 오류로 확정된 상태는 아닙니다.';
   if (reason.startsWith('runner_unknown:')) return '최근 실행 신호를 확인하지 못했습니다. 실제 실행 여부가 불확실하므로 중복 작업을 시작하기 전에 기록을 확인하세요.';
   if (reason.startsWith('openclaw_binding_')) return '총괄 OpenClaw 대화와 연결이 끊겼습니다. 원래 대화에서 연결을 복구해 주세요. 다른 담당으로 자동 전환하지 않습니다.';
@@ -148,8 +152,41 @@ function createDelegation(id) {
   const title = document.createElement('h3'), owner = document.createElement('span'), model = document.createElement('span'); owner.className='owner'; model.className='model'; title.append(owner,model);
   const state = document.createElement('span'); state.className='badge'; head.append(title,state); card.append(head);
   for (const cls of ['goal','activity','review','error-text']) { const node = document.createElement('div'); node.className=cls; card.append(node); }
-  const details=document.createElement('details'), summary=document.createElement('summary'), pre=document.createElement('pre'); summary.textContent='결과 및 변경 파일 보기'; details.append(summary,pre); card.append(details);
+  const details=document.createElement('details'), summary=document.createElement('summary'), pre=document.createElement('pre'); summary.textContent='결과 및 변경 파일 보기'; details.append(summary,pre); details.ontoggle=()=>{if(details.open)loadTaskDetails(details);}; card.append(details);
   card.append(createTerminal()); return card;
+}
+function taskDetailText(task) {
+  return [(task.goal || '').length > 240 ? `맡긴 내용\n${task.goal}` : '', task.result?.summary,
+    task.review?.reason ? `총괄 검토\n${task.review.reason}` : '',
+    task.result?.artifacts?.length ? `산출물\n${task.result.artifacts.join('\n')}` : '',
+    task.changes?.files?.length ? `변경 파일\n${task.changes.files.join('\n')}\n원본에 자동 반영되지 않았습니다.` : '',
+    task.cwd ? `작업 폴더: ${task.cwd}` : ''].filter(Boolean).join('\n\n');
+}
+async function loadTaskDetails(node) {
+  if (!node.open || !node.detailTask?.detailsTruncated || node.detailLoaded || node.detailLoading) return;
+  const key = node.dataset.detailKey, task = node.detailTask, rootId = node.detailRoot;
+  const current = () => node.isConnected && node.dataset.detailKey === key && selectedId === rootId;
+  node.detailLoading = true;
+  setText(node.querySelector('pre'), taskDetailText(task) + '\n\n전체 내용을 불러오는 중…');
+  try {
+    if (!window.api.tasksTaskDetail) throw Error('전체 결과 조회 기능을 사용할 수 없습니다.');
+    const full = await window.api.tasksTaskDetail(rootId, task.id, task.resultVersion, task.detailRevision);
+    if (!current()) return;
+    if (full.id !== task.id || full.resultVersion !== task.resultVersion) throw Error('결과가 변경됐습니다. 새로고침 후 다시 펼쳐 주세요.');
+    node.detailLoaded = true; node.detailText = taskDetailText(full);
+    setText(node.querySelector('pre'), node.detailText);
+  } catch (error) { if (current()) setText(node.querySelector('pre'), taskDetailText(task) + `\n\n전체 조회 실패 · ${error.message}`); }
+  finally { if (node.dataset.detailKey === key) node.detailLoading = false; }
+}
+function updateTaskDetails(node, rootId, task) {
+  const key = JSON.stringify([rootId, task.id, task.resultVersion, task.detailRevision]);
+  if (node.dataset.detailKey !== key) {
+    node.dataset.detailKey = key; node.detailLoaded = false; node.detailLoading = false; node.detailText = '';
+  }
+  node.detailRoot = rootId; node.detailTask = task;
+  if (node.detailLoaded) setText(node.querySelector('pre'), node.detailText);
+  else if (!node.detailLoading) setText(node.querySelector('pre'), taskDetailText(task) + (task.detailsTruncated ? '\n\n일부만 표시됨 · 펼치면 전체 내용을 불러옵니다.' : ''));
+  if (node.open) loadTaskDetails(node);
 }
 function terminalText(raw) {
   const value = v => typeof v === 'string' ? v : Array.isArray(v) ? v.filter(b=>b.type==='text').map(b=>b.text).join('\n') : '';
@@ -232,7 +269,9 @@ function renderDelegations(detail) {
   const keep = new Set(tasks.map(t => t.id));
   for (const node of Array.from($('delegations').children)) if (!keep.has(node.dataset.id)) node.remove();
   for (const task of tasks) {
-    const attempt = attempts.filter(a => a.taskId === task.id).sort((a,b) => b.createdAt-a.createdAt)[0];
+    const candidates = attempts.filter(a => a.taskId === task.id);
+    const currentId = task.currentAttemptId || task.observation?.latestAttemptId;
+    const attempt = currentId ? candidates.find(a => a.id === currentId) : candidates.at(-1);
     const o = task.observation || attempt?.observation || {}, p = task.binding || detail.root.participants?.find(p => p.id === task.participantId) || attempt?.binding || {};
     let state = o.executionState || o.state || attempt?.state || task.state;
     if (task.state === 'failed') state = 'failed'; // structured task failure can follow a successful CLI exit
@@ -260,16 +299,16 @@ function renderDelegations(detail) {
     const err = o.error || attempt?.observation?.error;
     const errorNode=card.querySelector('.error-text');
     setText(errorNode, state === 'blocked' ? `준비 실패: ${err?.message || attempt?.result?.reason || '실행 전 준비를 확인해 주세요.'}` : state === 'failed' ? `오류: ${err?.message || task.result?.summary || attempt?.result?.reason || '실행 결과를 처리하지 못했습니다.'}${err?.exitCode != null ? ` (종료 코드 ${err.exitCode})` : ''}` : state === 'unknown' ? '실행 여부가 불확실합니다. 실패로 확정하거나 자동 재실행하지 않습니다.' : '');
-    const result=card.querySelector('details'); result.hidden = !task.result && !task.changes && (task.goal || '').length <= 240;
+    const result=card.querySelector('details'); result.hidden = !task.result && !task.changes && !task.detailsTruncated && (task.goal || '').length <= 240;
     setText(result.querySelector('summary'), task.result || task.changes ? '결과 및 변경 파일 보기' : '맡긴 내용 전체 보기');
-    setText(result.querySelector('pre'), [(task.goal || '').length > 240 ? `맡긴 내용\n${task.goal}` : '', task.result?.summary, task.changes?.files?.length ? `변경 파일\n${task.changes.files.join('\n')}\n원본에 자동 반영되지 않았습니다.` : '', task.cwd ? `작업 폴더: ${task.cwd}` : ''].filter(Boolean).join('\n\n'));
+    updateTaskDetails(result, detail.root.id, task);
   }
   $('delegation-empty').hidden=!!tasks.length;
   text('delegation-empty', terminalRoots.includes(detail.root.status) || detail.root.status === 'ready' ? '위임 내역 없음' : '위임 대기');
   const c=detail.root.observation?.counts;
   text('delegation-count', c ? `전체 ${c.total} · 실행 ${c.running} · 대기 ${c.queued} · 오류 ${c.failed}${c.blocked ? ` · 준비 실패 ${c.blocked}` : ''}${c.unknown ? ` · 확인 필요 ${c.unknown}` : ''}` : `${tasks.length}개 작업`);
 }
-const eventLabels = {submitted:'작업 접수',main_intent:'총괄 담당에게 요청',spawn_intent:'실행 준비',runner_receipt:'실행 시작 확인',delegated:'작업 위임',execution_finished:'실행 종료',result_preserved:'결과 저장',review_delivery_queued:'총괄 검토 요청',main_processed:'총괄 결정 반영',attention:'상태 확인 필요',final_ready:'최종 결과 도착',final_delivery_ack:'사용자 결과 확인 완료',cancel_requested:'중단 요청',runner_spawn_error:'실행 시작 오류',openclaw_wake_requested:'OpenClaw에 검토 알림',openclaw_wake_failed:'OpenClaw 검토 알림 실패',openclaw_delivery_wake_requested:'결과 전달 알림',openclaw_delivery_wake_failed:'결과 전달 알림 실패',attention_cleared:'실행 신호 회복'};
+const eventLabels = {submitted:'작업 접수',input_requested:'입력 요청 기록',input_request_migrated:'기존 입력 요청 복원',preflight_blocked:'실행 준비 실패',preflight_retry_queued:'기존 작업 재시도 예약',root_resumed:'작업 재개',main_intent:'총괄 담당에게 요청',spawn_intent:'실행 준비',runner_receipt:'실행 시작 확인',delegated:'작업 위임',execution_finished:'실행 종료',result_preserved:'결과 저장',review_delivery_queued:'총괄 검토 요청',main_processed:'총괄 결정 반영',attention:'상태 확인 필요',final_ready:'최종 결과 도착',final_delivery_ack:'사용자 결과 확인 완료',cancel_requested:'중단 요청',runner_spawn_error:'실행 시작 오류',openclaw_wake_requested:'OpenClaw에 검토 알림',openclaw_wake_failed:'OpenClaw 검토 알림 실패',openclaw_delivery_wake_requested:'결과 전달 알림',openclaw_delivery_wake_failed:'결과 전달 알림 실패',openclaw_attention_wake_requested:'입력 필요 알림',openclaw_attention_wake_failed:'입력 필요 알림 실패',attention_delivery_ack:'입력 필요 안내 전달 확인',attention_cleared:'실행 경고 해소'};
 function renderExternal(detail) {
   const data = detail.external; $('external-records').hidden = !detail.root.readOnly;
   if (!data || !detail.root.readOnly) return;
@@ -291,7 +330,7 @@ function renderDetail(detail) {
   $('detail').hidden=false; $('detail-empty').hidden=true;
   badge($('detail-status'),systemError(root) ? 'failed' : root.status,rootLabel(root)); text('detail-title',shortGoal(root.goal || '작업',160));
   $('goal-details').hidden=(root.goal || '').length <= 160; text('goal-full',root.goal || '');
-  const main=(detail.attempts || []).filter(a=>a.role === 'main').sort((a,b)=>b.createdAt-a.createdAt)[0];
+  const main=(detail.attempts || []).filter(a=>a.role === 'main').at(-1);
   let mainTerminal=$('coordinator-terminal').querySelector('.terminal');
   if(!mainTerminal){mainTerminal=createTerminal();$('coordinator-terminal').append(mainTerminal);}
   updateTerminal(mainTerminal,root.id,main);

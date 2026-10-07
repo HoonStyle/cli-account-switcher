@@ -25,6 +25,11 @@ const bridge=registerBridge(api,client,store);bridge.startForTest();await bridge
 assert.equal(events.length,2);assert.match(events[0].text,/action=get id=r/);assert.match(events[0].text,/attempt=a, generation=1/);assert.equal(events[0].options.sessionKey,owner.sessionKey);assert.equal(events[0].options.contextKey,'task:cli-account-switcher:a:1');assert.equal(events[0].options.replace,true);
 const live=tool.create({...owner,assertInvocationCurrent(){throw Error('revoked');}});await assert.rejects(live.execute('x',{action:'decide',id:'r'}),/revoked/);assert.equal(decides,0);
 await assert.rejects(live.execute('x',{action:'get'}),/Task id is required/);
+nowSession=owner.sessionId;client.ensureService=async()=>{throw Error('ERR_TASK_PROTOCOL_MISMATCH fixture old service');};
+const diagnostic=tool.create({...owner,assertInvocationCurrent(){}});
+await diagnostic.execute('diagnostic',{action:'get',id:'r'});
+await assert.rejects(diagnostic.execute('mutation',{action:'decide',id:'r'}),/PROTOCOL_MISMATCH/);
+assert.equal(decides,0,'legacy service diagnosis cannot accidentally permit mutations');
 console.log('PASS plugin duplicate/consumed wake never ACKs, injection policy blocks, reset blocks, revoked tool rejects');
 const net=require('net'),clientRpc=require('../src/runtime/client');fs.mkdirSync(clientRpc.dir,{recursive:true});let bytes=0;
 const server=net.createServer(c=>c.on('data',d=>{bytes+=d.length;}));await new Promise(r=>server.listen(clientRpc.socket,r));
