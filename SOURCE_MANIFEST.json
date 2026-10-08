@@ -84,7 +84,7 @@
     "test/runtime-query-client.js": "7e653946e3d481c969bc61087aa0f22f1dda44484025107fb17ccb260931b845",
     "test/runtime-query-contracts.js": "a2604bf0b19ebe3a3c5724f7caaa49dcb369b21a539befcdf895bdc73d1b2049",
     "test/runtime-recovery.js": "b329266e4398858e139bfbb43390335d5123fa20bccfb63a1771e50f17f25f2e",
-    "test/runtime-research.js": "69cc551005c6de8ea6bc4d7c4bfbba0e8d05b088ef291569b81c2e5a6f108809",
+    "test/runtime-research.js": "82b1c34db7f72f90a77a3f53ede4068a9dc2831cc5a2bf069299ea54b7ff8bd7",
     "test/runtime-review-contracts.js": "c01afa65e1f1233c945311221b0514f23ba915daa81b549e93a3c3aedf7d525b",
     "test/runtime-service.js": "deaac07212809c95380ce66c73741083e6e4ecfb77a6d013f42d55f4e05d83b4",
     "test/runtime-state-contracts.js": "b4f575025a39b2781025617954c0bf50bd75e6aa8b6425573cfa83a772a4a3a3",

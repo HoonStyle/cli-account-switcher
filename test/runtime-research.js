@@ -11,7 +11,7 @@ function write(file, data, mode = 0o600) { fs.mkdirSync(path.dirname(file), { re
 function writable(root) { if (!fs.existsSync(root)) return; const st = fs.lstatSync(root); if (st.isSymbolicLink()) return; fs.chmodSync(root, st.isDirectory() ? 0o700 : 0o600); if (st.isDirectory()) for (const name of fs.readdirSync(root)) writable(path.join(root, name)); }
 function portablePython() {
   if (process.env.SWITCHER_TEST_PYTHON) return fs.realpathSync(process.env.SWITCHER_TEST_PYTHON);
-  const installed = path.join(os.homedir(), '.local/share/uv/python');
+  const installed = process.env.UV_PYTHON_INSTALL_DIR || path.join(os.homedir(), '.local/share/uv/python');
   if (fs.existsSync(installed)) for (const name of fs.readdirSync(installed).sort()) {
     const bin = path.join(installed, name, 'bin');
     if (!name.startsWith('cpython-3.') || !fs.existsSync(bin)) continue;
