@@ -2,7 +2,7 @@
   "schema": 1,
   "version": "0.2.0-preview.10",
   "files": {
-    ".github/workflows/ci.yml": "83ac83ec3b2625b103a41b15ddb3ade6c884f359d0ca695bb2d59c6a0635988b",
+    ".github/workflows/ci.yml": "c87b3ae409e9e870cc0e305b16c68c90e6506464a795f20d451658170315d808",
     ".gitignore": "b9c6fd362286c31803573769a5570a15db1609c47efe816b886a2acc92e79b57",
     "README.md": "b0995f076d9b49312de510397c4be85750ff7050cc4fe88c8da2e8aac01ab93d",
     "package-lock.json": "cdc94f6261faedb56da3ca4b8c453cff3007e2f169cb55552afbd4838d250cdb",
