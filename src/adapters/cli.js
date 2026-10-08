@@ -4,6 +4,7 @@ const path = require('path');
 const { randomUUID } = require('crypto');
 const { normalizeModel } = require('../launch/model');
 const { normalizeExecutionPolicy, buildSettings } = require('../runtime/execution-policy');
+const { researchSettings } = require('../runtime/research-policy');
 const mainSchema = { type: 'object', additionalProperties: false, required: ['kind', 'summary', 'delegations', 'reviews', 'finalResponse'], properties: {
   kind: { type: 'string', enum: ['delegate', 'complete', 'needs_user'] }, summary: { type: 'string' },
   delegations: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['participantId', 'goal', 'resolvesTaskIds', 'inputs'], properties: { participantId: { type: 'string' }, goal: { type: 'string' }, resolvesTaskIds: { type: 'array', items: { type: 'string' } }, inputs: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['taskId', 'resultVersion', 'paths'], properties: { taskId: { type: 'string' }, resultVersion: { type: 'integer' }, paths: { type: 'array', items: { type: 'string' } } } } } } } },
@@ -11,14 +12,15 @@ const mainSchema = { type: 'object', additionalProperties: false, required: ['ki
   finalResponse: { type: 'string' },
 } };
 const childSchema = { type: 'object', additionalProperties: false, required: ['success', 'summary', 'artifacts'], properties: { success: { type: 'boolean' }, summary: { type: 'string' }, artifacts: { type: 'array', items: { type: 'string' } } } };
-function buildInvocation({ binding, role, sessionId, permission, executionPolicy, cwd, dir }) {
+function buildInvocation({ binding, role, sessionId, permission, executionPolicy, cwd, dir, capabilitySnapshot }) {
   const policy = normalizeExecutionPolicy(permission, executionPolicy);
   const model = normalizeModel(binding.model);
   const schema = role === 'child' ? childSchema : mainSchema;
   const schemaFile = path.join(dir, 'schema.json');
   fs.writeFileSync(schemaFile, JSON.stringify(schema), { mode: 0o600 });
   const outputFile = path.join(dir, 'last-response.txt');
-  let args, executionEnv, expectedSession = sessionId;
+  let args, executionEnv, researchSnapshot, expectedSession = sessionId;
+  if (policy === 'web-research' && binding.tool !== 'claude') { const error = Error('web-research is supported only by Claude'); error.code = 'POLICY_INCOMPATIBLE'; throw error; }
   if (binding.tool === 'claude') {
     args = ['--safe-mode', '--strict-mcp-config', '--tools', role === 'child' ? (permission === 'workspace-write' ? 'Read,Glob,Grep,Edit,Write' : 'Read,Glob,Grep') : '', '--permission-mode', role === 'child' && permission === 'workspace-write' ? 'acceptEdits' : 'dontAsk', '-p', '--output-format', 'stream-json', '--verbose', '--json-schema', JSON.stringify(schema)];
     if (role === 'child' && policy === 'build-test') {
@@ -26,6 +28,14 @@ function buildInvocation({ binding, role, sessionId, permission, executionPolicy
       args[args.indexOf('--tools') + 1] += ',Bash';
       args.push('--restricted', '--setting-sources', '', '--settings', prepared.settingsFile, '--permission-prompts', 'none');
       executionEnv = prepared.env;
+    }
+    if (policy === 'web-research') {
+      const prepared = researchSettings({ binding, permission, dir, capabilitySnapshot });
+      args.splice(args.indexOf('--safe-mode'), 1);
+      // A file-read sandbox has not been demonstrated, so research is web-only.
+      args[args.indexOf('--tools') + 1] = 'WebSearch,WebFetch';
+      args.push('--restricted', '--setting-sources', '', '--settings', prepared.settingsFile, '--mcp-config', prepared.mcpFile, '--disable-slash-commands', '--permission-prompts', 'none');
+      executionEnv = prepared.env; researchSnapshot = prepared.researchSnapshot;
     }
     if (model) args.push('--model', model);
     if (sessionId) args.push('--resume', sessionId);
@@ -38,7 +48,7 @@ function buildInvocation({ binding, role, sessionId, permission, executionPolicy
     if (sessionId) args.push(sessionId);
     args.push('-');
   } else throw new Error('Unsupported CLI adapter');
-  return { executable: binding.executable, args, expectedSession, outputFile, ...(executionEnv ? { executionEnv } : {}) };
+  return { executable: binding.executable, args, expectedSession, outputFile, ...(executionEnv ? { executionEnv } : {}), ...(researchSnapshot ? { researchSnapshot } : {}) };
 }
 function parseJSON(text) {
   const trimmed = text.trim().replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');

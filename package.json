@@ -1,6 +1,6 @@
 {
   "name": "cli-account-switch",
-  "version": "0.2.0-preview.9",
+  "version": "0.2.0-preview.10",
   "description": "Local account profiles for official Claude Code and Codex CLIs",
   "main": "src/main.js",
   "private": true,
@@ -11,12 +11,19 @@
     "dist:win": "electron-builder --win",
     "test:runtime": "node test/profile-launch.js && node test/runtime-artifacts.js && node test/runtime-recovery.js && node test/runtime-execution-policy.js && node test/runtime.js && node test/runtime-observation.js && node test/runtime-models.js && node test/runtime-output.js && node test/runtime-events.js && node test/runtime-query-contracts.js && node test/runtime-query-client.js && node test/runtime-state-contracts.js && node test/runtime-transport-contracts.js && node test/runtime-faults.js && node test/runtime-service.js && node test/runtime-review-contracts.js && node test/openclaw-bridge.js && node test/openclaw-basics.js && node test/openclaw-query.js && node test/rpc-unicode.js && node test/openclaw-service.js",
     "build:plugin": "node scripts/build-openclaw-plugin.js",
-    "test:dashboard": "node test/model-catalog.js && node test/dashboard.js && node test/openclaw-dashboard.js && electron test/tasks-ui.js && electron test/tasks-status-ui.js && electron test/tasks-terminal-ui.js && electron test/project-folders-ui.js && electron test/openclaw-ui.js",
-    "test:reset-ui": "electron test/reset-credits-ui.js"
+    "test:dashboard": "node test/model-catalog.js && node test/dashboard.js && node test/openclaw-dashboard.js && electron test/tasks-ui.js && electron test/tasks-status-ui.js && electron test/tasks-response-ui.js && electron test/tasks-terminal-ui.js && electron test/project-folders-ui.js && electron test/openclaw-ui.js",
+    "test:reset-ui": "electron test/reset-credits-ui.js",
+    "build:research": "node scripts/build-research.js",
+    "prebuild:plugin": "npm run build:research",
+    "pretest:runtime": "npm run build:research",
+    "predist:mac": "npm run build:research",
+    "predist:win": "npm run build:research",
+    "test:structural": "node --test test/structural-contracts.js && node test/runtime-research.js"
   },
   "devDependencies": {
     "electron": "^44.4.2",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "esbuild": "0.28.2"
   },
   "build": {
     "appId": "dev.hoonstyle.cli-account-switcher.distribution",
@@ -63,5 +70,8 @@
       "artifactName": "${productName}-${version}-win-${arch}-portable.${ext}"
     }
   },
-  "author": "HoonStyle"
+  "author": "HoonStyle",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1"
+  }
 }

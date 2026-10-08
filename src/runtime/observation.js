@@ -71,10 +71,11 @@ function observe(root, tasks, attempts, allAttempts, options) {
   for (const a of observedAttempts.filter(a => a.role === 'main' && a.observation.error)) errors.push({ attemptId: a.id, ...a.observation.error });
   if (root.lastDeliveryWakeError) errors.push(error('delivery_wake', root.lastDeliveryWakeError));
   if (root.status === 'needs_user' && root.attentionDelivery === 'pending' && root.lastAttentionWakeError) errors.push(error('attention_wake', root.lastAttentionWakeError));
+  const uncertainDelivery=root.coordinator?.tool === 'openclaw' && ['unknown','blocked'].includes(root.status === 'needs_user' ? root.attentionDelivery : root.finalDelivery);
   const observation = { phase: root.status, counts, activeAttemptIds: attempts.filter(a => active.has(a.state)).map(a => a.id),
     heartbeatAt: latestTime(observedAttempts.map(a => a.observation.heartbeatAt)),
     lastOutputAt: latestTime(observedAttempts.map(a => a.observation.lastOutputAt)),
-    errors, requiresAttention: !!root.attention || root.status === 'needs_user' || counts.unknown > 0 ||
+    errors, requiresAttention: uncertainDelivery || !!root.attention || root.status === 'needs_user' || counts.unknown > 0 ||
       (!['ready', 'completed', 'cancelled'].includes(root.status) && (observedTasks.some(t => t.observation.error && !t.review) || observedAttempts.some(a => a.state === 'external_wait' && a.observation.error))),
     attentionReason: (root.status === 'needs_user' ? root.inputRequest?.reason : null) || root.attention || null, deliveryStatus: root.finalDelivery || 'pending', observedAt: options.now };
   return { root: { ...root, observation }, tasks: observedTasks, attempts: observedAttempts };

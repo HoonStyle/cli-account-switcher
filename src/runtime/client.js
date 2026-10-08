@@ -115,4 +115,9 @@ async function readQueryPages(id, query = {}) {
   if (createHash('sha256').update(source).digest('hex') !== revision) invalid();
   return view === 'final' ? source : JSON.parse(source);
 }
-module.exports = { request, ensureService, readDashboard, readDashboardList, readQueryPages, dir, socket };
+function requestFromHost(method, params, options) {
+  if (!['bridgeClaimDelivery', 'bridgeBeginDelivery', 'bridgeSettleDelivery', 'bridgeReadDelivery'].includes(method)) throw Error('Unsupported host bridge operation');
+  return request(method, require('./bridge-auth').hostRequest(dir, method, params), options);
+}
+function signDeliveryReceipt(statement) { return require('./bridge-auth').signDeliveryReceipt(dir, statement); }
+module.exports = { request, requestFromHost, signDeliveryReceipt, ensureService, readDashboard, readDashboardList, readQueryPages, dir, socket };

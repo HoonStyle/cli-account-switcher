@@ -309,7 +309,7 @@ ipcMain.handle('tasksOutput', async (event, id, attemptId) => { taskSender(event
 function mutableTaskId(id) { const value=taskText(id, '작업 ID', 200); if(value.startsWith('oc-'))throw Error('OpenClaw 기록은 읽기 전용입니다.'); return value; }
 ipcMain.handle('tasksCancel', async (event, id) => { taskSender(event); return taskRequest('cancel', { id: mutableTaskId(id) }); });
 ipcMain.handle('tasksResume', async (event, id, request) => { taskSender(event); return taskRequest('resume', { id: mutableTaskId(id), request }); });
-ipcMain.handle('tasksRespond', async (event, id, message) => { taskSender(event); return taskRequest('respond', { id: mutableTaskId(id), message: taskText(message, '추가 지시') }); });
+ipcMain.handle('tasksRespond', async (event, id, request) => { taskSender(event); return taskRequest('respond', { id: mutableTaskId(id), request }); });
 ipcMain.handle('tasksSubmit', async (event, input) => {
   taskSender(event);
   const params = require('./runtime/submission').submission(input, store.load());

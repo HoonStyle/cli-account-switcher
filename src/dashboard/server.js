@@ -80,7 +80,7 @@ function createDashboard({ port = 18473, publicOrigin, runtime = client, account
           if (id.startsWith('oc-')) return json(res, 403, { error: 'OpenClaw 기록은 읽기 전용입니다.' });
           const params = { id };
           if (method === 'resume') params.request = data.request;
-          if (method === 'respond') params.message = text(data.message, 'message');
+          if (method === 'respond') params.request = data.request;
           if (method === 'ack') { if (!Number.isInteger(data.version) || data.version < 1) throw Error('Invalid result version'); params.version = data.version; }
           return json(res, 200, await rpc(method, params));
         }

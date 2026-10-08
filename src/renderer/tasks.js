@@ -4,7 +4,7 @@ let snapshot, selectedId = null, detailCache = null, rootsCache = [], filter = '
 let busy = false, loading = false, connected = false, lastSync = null, selectionVersion = 0, fetchNotice = null, detailRequest = 0;
 let requestId = crypto.randomUUID(), resumeRequestId = crypto.randomUUID(), renderedMainKey;
 let managedRoots = [], externalRoots = [], sourceFilter = 'all';
-const mainModels = new Map(), responseDrafts = new Map();
+const mainModels = new Map(), responseDrafts = new Map(), responseTargets = new Map();
 const terminalRoots = ['completed', 'cancelled', 'failed', 'observed_ended', 'observed_idle'];
 const labels = { observed_ended:'실행 종료 · 완료 미확인', observed_idle:'대기 · 최근 실행 없음', observed_unknown:'현재 상태 미확인', observed_stale:'연결 끊김 · 이전 기록', planning:'작업 준비 중', awaiting_review:'결과 검토 중', needs_user:'답변 필요', ready:'결과 도착', cancel_requested:'중단 처리 중', queued:'순서 대기', starting:'시작 중', running:'실행 중', waiting:'응답 대기', blocked:'준비 실패', completed:'확인 완료', succeeded:'실행 완료', failed:'오류 발생', cancelled:'중단됨', pending:'대기 중', awaiting_input:'입력 대기', needs_attention:'확인 필요', unknown:'실행 확인 필요', external_wait:'총괄 응답 대기', quiet:'실행 중 · 새 출력 없음' };
 const status = value => labels[value] || '상태 확인 필요';
@@ -40,6 +40,11 @@ function attentionText(root) {
 function nextStep(root) {
   if (root.readOnly) return ({failed:['OpenClaw 오류 확인 필요','원래 대화에서 오류를 확인해 주세요. 이 화면은 읽기 전용입니다.','error'],observed_stale:['OpenClaw 연결 확인 필요','새로고침으로 다시 확인하세요. 표시 중인 내용은 이전 기록입니다.','warning'],waiting:['OpenClaw 응답 대기','원래 대화에서 필요한 입력이나 진행 상황을 확인해 주세요.','warning']})[root.status] || ['', '', ''];
   const extra = attentionText(root);
+  if(root.status === 'ready' && root.coordinator?.tool === 'openclaw') {
+    if(root.finalDelivery === 'unknown') return ['결과 저장 완료 · 전달 여부 확인 필요','메시지를 다시 보내지 않고 저장된 전송 영수증을 확인합니다. 원래 대화에서 전달 여부를 확인해 주세요.','warning'];
+    if(root.finalDelivery === 'blocked') return ['결과 저장 완료 · 전달 경로 확인 필요','결과는 보존돼 있습니다. 원래 대화의 연결 상태를 확인해 주세요.','warning'];
+    if(root.finalDelivery !== 'delivered') return ['결과 저장 완료 · 전달 대기','원래 대화로 전달할 결과가 저장돼 있습니다. 작업을 다시 실행할 필요는 없습니다.','running'];
+  }
   if (root.status === 'ready') return ['', '', ''];
   if (root.status === 'completed') return ['', '', ''];
   if (root.status === 'cancelled') return ['', '', ''];
@@ -326,7 +331,9 @@ function renderExternal(detail) {
   fill('external-activity', data.activity || [], item => { const li=document.createElement('li');li.textContent=`${item.name} · ${{completed:'도구 실행 종료',running:'실행 중',failed:'실패',unknown:'결과 미확인'}[item.status] || item.status}`;return li; });
 }
 function renderDetail(detail) {
-  const root=detail.root; detailCache=detail; renderExternal(detail); $('timeline').hidden=!!root.readOnly;
+  const root=detail.root;
+  if (!responseTargets.has(root.id) || !$('response').value.trim()) responseTargets.set(root.id, {generation:root.generation,inputVersion:root.inputRequest?.version});
+  detailCache=detail; renderExternal(detail); $('timeline').hidden=!!root.readOnly;
   $('detail').hidden=false; $('detail-empty').hidden=true;
   badge($('detail-status'),systemError(root) ? 'failed' : root.status,rootLabel(root)); text('detail-title',shortGoal(root.goal || '작업',160));
   $('goal-details').hidden=(root.goal || '').length <= 160; text('goal-full',root.goal || '');
@@ -349,7 +356,7 @@ function renderDetail(detail) {
   $('respond-area').hidden=root.status !== 'needs_user' || root.coordinator?.tool === 'openclaw';
   $('resume-build').disabled=root.permission !== 'workspace-write';
   text('resume-help', `${root.round || 0}/${root.maxRounds || 3}회 사용 · 준비 실패 ${(detail.tasks || []).filter(t=>t.state==='blocked').length}건은 같은 작업으로 재시도합니다.`);
-  if(root.coordinator?.tool === 'openclaw' && root.status === 'needs_user') text('next-body', `${attentionText(root)}\n원래 OpenClaw 대화에서 재개할 수 있습니다.`);
+  if(root.coordinator?.tool === 'openclaw' && root.status === 'needs_user') text('next-body', `${root.attentionDelivery === 'delivered' ? '안내는 전달됐으며 답변을 기다립니다.\n' : ''}${attentionText(root)}\n원래 OpenClaw 대화에서 재개할 수 있습니다.`);
   renderDelegations(detail);
   $('toggle-terminals').hidden=!document.querySelector('.terminal:not([hidden])');
   const events=(detail.events || []).slice(-12).reverse(), key=JSON.stringify(events);
@@ -488,7 +495,21 @@ $('submit-form').onsubmit=event => {
   });
 };
 $('ack').onclick=() => { if(selectedId?.startsWith('oc-')||detailCache?.root.readOnly)return; const id=selectedId,version=detailCache?.root.finalVersion; action(async()=>{ await window.api.tasksAck(id,version); notice('결과 확인을 기록했습니다.'); }); };
-$('respond').onclick=() => { if(selectedId?.startsWith('oc-')||detailCache?.root.readOnly)return; const id=selectedId; action(async()=>{ const value=$('response').value.trim(); if(!value) throw Error('답변이나 다음 지시를 입력해 주세요.'); const root=detailCache.root, retryTaskIds=detailCache.tasks.filter(t=>t.state==='blocked').map(t=>t.id), extraRounds=Number($('extra-rounds').value), enableBuild=$('resume-build').checked && !$('resume-build').disabled; if(retryTaskIds.length || extraRounds || enableBuild) { const request={requestId:resumeRequestId,extraRounds,retryTaskIds,message:value,...(enableBuild ? {executionPolicy:'build-test'} : {})}; await window.api.tasksResume(id,request); resumeRequestId=crypto.randomUUID(); } else await window.api.tasksRespond(id,value); $('response').value=''; responseDrafts.delete(id); notice('답변을 보냈습니다. 담당자가 작업을 이어갑니다.'); }); };
+$('respond').onclick=() => {
+  if(selectedId?.startsWith('oc-') || detailCache?.root.readOnly)return;
+  const id=selectedId, root=detailCache.root, target=responseTargets.get(id);
+  const value=$('response').value.trim(), retryTaskIds=detailCache.tasks.filter(t=>t.state==='blocked').map(t=>t.id);
+  const extraRounds=Number($('extra-rounds').value), enableBuild=$('resume-build').checked && !$('resume-build').disabled;
+  action(async()=>{
+    if(!value) throw Error('답변이나 다음 지시를 입력해 주세요.');
+    if(target?.generation !== root.generation || target?.inputVersion !== root.inputRequest?.version) throw Error('답변 작성 중 질문이 바뀌었습니다. 현재 질문을 확인하고 답변을 다시 작성해 주세요.');
+    const request={requestId:resumeRequestId,...target,message:value};
+    if(retryTaskIds.length || extraRounds || enableBuild) await window.api.tasksResume(id,{...request,extraRounds,retryTaskIds,...(enableBuild ? {executionPolicy:'build-test'} : {})});
+    else await window.api.tasksRespond(id,request);
+    resumeRequestId=crypto.randomUUID(); $('response').value=''; responseDrafts.delete(id); responseTargets.delete(id);
+    notice('답변을 보냈습니다. 담당자가 작업을 이어갑니다.');
+  });
+};
 $('cancel').onclick=()=>{ if(selectedId?.startsWith('oc-')||detailCache?.root.readOnly)return; $('confirm-cancel').hidden=false; $('cancel-back').focus(); };
 $('cancel-back').onclick=()=>{ $('confirm-cancel').hidden=true; $('cancel').focus(); };
 $('cancel-confirm').onclick=()=>{ if(selectedId?.startsWith('oc-')||detailCache?.root.readOnly)return; const id=selectedId; action(async()=>{ await window.api.tasksCancel(id); $('confirm-cancel').hidden=true; notice('중단을 요청했습니다. 실행 종료를 확인하고 있습니다.'); }); };

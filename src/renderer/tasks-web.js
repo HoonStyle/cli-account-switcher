@@ -18,7 +18,7 @@ window.api = {
   tasksSubmit: input => request('/api/tasks', input),
   tasksCancel: id => request(`/api/tasks/${encodeURIComponent(id)}/cancel`, {}),
   tasksResume: (id, request) => requestTaskResume(id, request),
-  tasksRespond: (id, message) => request(`/api/tasks/${encodeURIComponent(id)}/respond`, { message }),
+  tasksRespond: (id, body) => request(`/api/tasks/${encodeURIComponent(id)}/respond`, { request: body }),
   tasksAck: (id, version) => request(`/api/tasks/${encodeURIComponent(id)}/ack`, { version }),
 };
 

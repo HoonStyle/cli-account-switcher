@@ -16,12 +16,12 @@ git(project, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invali
 const commit = git(project, 'rev-parse', 'HEAD');
 const e = new Engine(path.join(tmp, 'runtime'));
 function root(options = {}) {
-  const r = { id: randomUUID(), coordinator: binding, participants: [binding], permission: 'workspace-write', projectPath: project, commit, generation: 1, round: 3, maxRounds: 3, status: 'needs_user', goal: 'fixture', sessionId: 'session', ...options };
+  const r = { id: randomUUID(), coordinator: binding, participants: [binding], permission: 'workspace-write', projectPath: project, commit, generation: 1, round: 3, maxRounds: 3, status: 'needs_user', inputRequest: { generation: 1, version: 1 }, goal: 'fixture', sessionId: 'session', ...options };
   e.db.put('root', r); return r;
 }
 function task(r, options = {}) { const t = { id: randomUUID(), rootId: r.id, binding, goal: 'fixture', state: 'blocked', resultVersion: 0, review: null, ...options }; e.db.put('task', t); return t; }
 function attempt(r, t, options = {}) { const a = { id: randomUUID(), rootId: r.id, taskId: t?.id, role: t ? 'child' : 'main', binding, generation: 1, state: 'blocked', token: randomUUID(), processed: true, result: { state: 'blocked', failurePhase: 'preflight', processStarted: false, reason: 'missing SDK' }, ...options }; e.db.put('attempt', a); return a; }
-function request(t, options = {}) { return { requestId: randomUUID(), extraRounds: 0, retryTaskIds: t ? [t.id] : [], message: 'User authorized recovery', ...options }; }
+function request(t, options = {}) { return { generation: 1, inputVersion: t ? e.root(t.rootId).inputRequest.version : 1, requestId: randomUUID(), extraRounds: 0, retryTaskIds: t ? [t.id] : [], message: 'User authorized recovery', ...options }; }
 function blockAgain(r, t) { const a = e.attempts(r.id).at(-1); a.state = 'starting'; a.token = randomUUID(); a.processed = false; e.db.put('attempt', a); e.consume(a, { attemptId: a.id, token: a.token, state: 'blocked', failurePhase: 'preflight', processStarted: false, reason: 'still missing SDK' }); }
 try {
   const r = root(), t = task(r), old = attempt(r, t), req = request(t);
@@ -43,21 +43,21 @@ try {
   for (const extraRounds of [-1, 4, 0.5]) assert.throws(() => e.resume(root().id, request(null, { extraRounds })), /limits/);
   assert.throws(() => e.resume(root({ maxRounds: 9 }).id, request(null, { extraRounds: 2 })), /total round/);
   assert.throws(() => e.resume(root({ permission: 'read-only' }).id, request(null, { executionPolicy: 'build-test' })), /workspace-write/);
-  for (const status of ['completed', 'cancelled', 'ready']) assert.throws(() => e.resume(root({ status }).id, request(null)), /not waiting/);
+  for (const status of ['completed', 'cancelled', 'ready']) assert.throws(() => e.resume(root({ status }).id, request(null)), /stale or already consumed/);
   for (const status of ['unknown', 'starting', 'running', 'queued', 'external_wait']) {
     const busy = root(); attempt(busy, null, { state: status });
     assert.throws(() => e.resume(busy.id, request(null)), /pending or ambiguous/);
   }
   const all = root(), a = task(all), b = task(all); attempt(all, a); attempt(all, b);
   assert.throws(() => e.resume(all.id, request(a)), /all and only/);
-  assert.throws(() => e.respond(all.id, 'continue'), /bounded resume/);
+  assert.throws(() => e.respond(all.id, request(null)), /bounded resume/);
   const ambiguous = root(), at = task(ambiguous); attempt(ambiguous, at, { result: { state: 'blocked', failurePhase: 'preflight', processStarted: true } });
   assert.throws(() => e.resume(ambiguous.id, request(at)), /proven preflight/);
   console.log('PASS round caps, terminal/pending roots, explicit all-task retry and ambiguous receipt rejection');
 
   const owner = { agentId: 'owner', sessionKey: 'agent:owner:fixture', sessionId: 'session' };
   const bridge = e.bindOpenClaw(owner), oc = root({ coordinator: { tool: 'openclaw', bindingId: bridge.id, ...owner } });
-  assert.throws(() => e.respond(oc.id, 'continue'), /binding mismatch/);
+  assert.throws(() => e.respond(oc.id, request(null)), /binding mismatch/);
   assert.throws(() => e.resume(oc.id, request(null)), /binding mismatch/);
   assert.throws(() => e.resume(oc.id, request(null), { ...owner, sessionId: 'foreign' }), /binding mismatch/);
   const ocRequest = request(null, { extraRounds: 1, executionPolicy: 'build-test' }); e.resume(oc.id, ocRequest, owner);
@@ -73,7 +73,7 @@ try {
   assert.throws(() => e.consume({ ...pa, state: 'running', processStarted: true }, { attemptId: pa.id, token: pa.token, state: 'blocked', processStarted: false, failurePhase: 'preflight' }), /Ambiguous/);
   e.consume(pa, { attemptId: pa.id, token: pa.token, state: 'blocked', processStarted: false, failurePhase: 'preflight', reason: 'SDK missing' });
   assert.equal(e.root(paused.id).status, 'needs_user'); assert.equal(e.db.get('attempt', pb.id).result.reason, 'root_preflight_pause');
-  e.resume(paused.id, request(null, { retryTaskIds: [p1.id, p2.id] }));
+  e.resume(paused.id, request(null, { retryTaskIds: [p1.id, p2.id], inputVersion: e.root(paused.id).inputRequest.version }));
   assert.equal(e.db.get('task', p1.id).preflightRetries, 1); assert.equal(e.db.get('task', p2.id).preflightRetries || 0, 0);
   console.log('PASS nonterminal blocked receipt and sibling pause without retry charge');
 

@@ -21,6 +21,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - run: npm run test:structural
+        if: runner.os == 'macOS'
       - run: npm run test:runtime
         if: runner.os == 'macOS'
       - run: npm run test:dashboard

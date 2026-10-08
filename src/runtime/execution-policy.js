@@ -7,8 +7,9 @@ const { execFileSync } = require('child_process');
 // A capability grant, not a synonym for write permission. Old roots never gain
 // command execution just because this version is installed.
 function normalizeExecutionPolicy(permission, value = 'edit-only') {
-  if (!['edit-only', 'build-test'].includes(value)) throw Error('Invalid executionPolicy');
+  if (!['edit-only', 'build-test', 'web-research'].includes(value)) throw Error('Invalid executionPolicy');
   if (value === 'build-test' && permission !== 'workspace-write') throw Error('build-test requires workspace-write');
+  if (value === 'web-research' && permission !== 'read-only') { const error = Error('web-research requires read-only'); error.code = 'POLICY_INCOMPATIBLE'; throw error; }
   return value;
 }
 const buildRules = ['dotnet build', 'dotnet build *', 'dotnet test', 'dotnet test *', 'dotnet restore', 'dotnet restore *',

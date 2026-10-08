@@ -3,7 +3,7 @@ const fs=require('fs'),os=require('os'),path=require('path'),assert=require('ass
 const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'switch-bridge-'));process.env.HOME=tmp;process.env.CLI_ACCOUNTS_ROOT=path.join(tmp,'accounts');
 const store=require('../src/store');store.addProfile('claude','fixture',{shareSettings:false});let s=store.load();s.realBin.claude=process.execPath;store.save(s);
 const {Engine}=require('../src/runtime/engine');let e=new Engine(path.join(tmp,'runtime'));
-const owner={agentId:'main',sessionKey:'agent:main:discord:channel:fixture',sessionId:'session-1'};
+const owner={agentId:'main',sessionKey:'agent:main:discord:channel:fixture',sessionId:'session-1',deliveryTarget:{channel:'discord',accountId:'default',to:'channel:fixture'}};
 const b=e.bindOpenClaw(owner);const r=e.submit({requestId:'external',mainKind:'openclaw',bindingId:b.id,projectPath:tmp,goal:'test',participants:[{tool:'claude',profileId:'fixture'}]});
 let pending=e.openClawPending()[0];assert.equal(e.attempts(r.id)[0].state,'external_wait');assert.throws(()=>e.openClawDecide(r.id,{...owner,sessionId:'reset'},pending.attemptId,1,{}),/mismatch/);
 const decision={kind:'delegate',summary:'one',reviews:[],delegations:[{participantId:'p1',goal:'read',resolvesTaskIds:[]}]};
@@ -12,7 +12,7 @@ e.openClawDecide(r.id,owner,pending.attemptId,1,decision);e.openClawDecide(r.id,
 let t=e.tasks(r.id)[0];t.state='succeeded';t.resultVersion=1;t.result={success:true,summary:'done'};e.db.put('task',t);let ca=e.attempts(r.id).find(a=>a.role==='child');ca.state='succeeded';ca.processed=true;e.db.put('attempt',ca);e.tick();pending=e.openClawPending()[0];
 assert.throws(()=>e.openClawDecide(r.id,owner,pending.attemptId,2,decision),/Stale/);
 const complete={kind:'complete',summary:'verified',delegations:[],reviews:[{taskId:t.id,resultVersion:1,decision:'accepted',reason:'checked'}],finalResponse:'done'};
-e.openClawDecide(r.id,owner,pending.attemptId,1,complete);assert.equal(e.root(r.id).status,'ready');assert.equal(e.root(r.id).finalDelivery,'pending');e.ack(r.id,1);assert.equal(e.root(r.id).status,'completed');
+e.openClawDecide(r.id,owner,pending.attemptId,1,complete);assert.equal(e.root(r.id).status,'ready');assert.equal(e.root(r.id).finalDelivery,'pending');assert.throws(()=>e.ack(r.id,1,owner),/verified host delivery receipt/);const n=e.claimDelivery(r.id,'final',1,owner);e.beginDelivery(r.id,'final',1,owner,n.claimToken);e.settleDelivery(require('../src/runtime/bridge-auth').signDeliveryReceipt(path.join(tmp,'runtime'),{deliveryId:n.id,rootId:r.id,kind:'final',version:1,generation:1,claimToken:n.claimToken,payloadHash:n.payloadHash,owner:n.owner,outcome:'sent',receiptVersion:1,channel:'discord',accountId:'default',destination:'channel:fixture',parts:[{messageId:'fixture-message',index:0,kind:'text'}]}));e.ack(r.id,1,owner);assert.equal(e.root(r.id).status,'completed');
 const r2=e.submit({requestId:'external-2',mainKind:'openclaw',bindingId:b.id,projectPath:tmp,goal:'test',participants:[{tool:'claude',profileId:'fixture'}]});const newer=e.bindOpenClaw({...owner,sessionId:'session-2'});e.suspendOpenClaw(b.id,'reset');assert.equal(e.db.get('bridge',newer.id).suspended,false);assert.equal(e.openClawPending().length,0);assert.throws(()=>e.authorizeOpenClaw(r2.id,owner),/mismatch/);e.cancel(r2.id);e.tick();assert.equal(e.root(r2.id).status,'cancelled');e.db.close();
 console.log('PASS external main binding, no CLI main, durable pending/replay, scoped review, separate ack, reset and cancel');
 (async()=>{

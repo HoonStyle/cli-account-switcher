@@ -29,6 +29,7 @@ function save(name, value) {
     delete env.ELECTRON_RUN_AS_NODE;
     // Do not leak service internals or delegate mutation authority through environment.
     delete env.CLI_ACCOUNTS_SOCKET;
+    require('./research-policy').validateResearchInvocation(spec.binding, spec.invocation);
     child = spawn(spec.invocation.executable, spec.invocation.args, { cwd: spec.cwd, env, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
     child.once('spawn', () => { processStarted = true; phase = 'execution'; });
     const heartbeat = () => {
@@ -120,7 +121,7 @@ function save(name, value) {
         if (alive()) throw Error('Runner fault: process termination remains unconfirmed');
       }
     }
-    save('result.json', { ...resultBase, state: processStarted ? 'failed' : 'blocked', failurePhase: processStarted && phase === 'preflight' ? 'execution' : phase, processStarted, ...(exitReceipt ? { exit: exitReceipt } : {}), reason: e.message });
+    save('result.json', { ...resultBase, state: processStarted ? 'failed' : 'blocked', failurePhase: processStarted && phase === 'preflight' ? 'execution' : phase, processStarted, ...(exitReceipt ? { exit: exitReceipt } : {}), reason: e.message, ...(e.code ? {code:e.code} : {}) });
   }
   finally { clearInterval(timer); }
 })().catch(e => { process.stderr.write(e.message + '\n'); process.exitCode = 1; });

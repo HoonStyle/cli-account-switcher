@@ -7,6 +7,7 @@ const { Engine, alive } = require('./engine');
 const { dir, socket } = require('./client');
 const { REQUEST_LIMIT, RESPONSE_LIMIT, PROTOCOL_VERSION, HELLO_METHOD, TRANSPORT, isReadOnly, protocolMismatch, requestTooLarge } = require('./transport');
 const { queryReply, LOCAL_QUERY_OPTIONS, projectDashboard, projectDashboardList } = require('./query');
+const { assertHostRequest } = require('./bridge-auth');
 fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 const lock = path.join(dir, 'service.lock');
 // Serialize stale-lock inspection as well as acquisition. A crashed recovery guard
@@ -38,11 +39,15 @@ const engine = new Engine(dir, { attention: r => {
 } });
 let timer, stopping = false;
 const methods = {
-  health: () => ({ status: 'ok', pid: process.pid, version: 1, appVersion: require('../edition.json').version, edition: require('../edition.json').name, transport: TRANSPORT, capabilities: { claude: 'requires-runtime-verification', codex: 'requires-runtime-verification', openclaw: 'plugin-bridge', managedDepth: 1, modelSelection: true, artifactInputs: true, boundedResume: true, claudeBuildTest: true, attentionDelivery: true } }),
+  health: () => ({ status: 'ok', pid: process.pid, version: 1, appVersion: require('../edition.json').version, edition: require('../edition.json').name, transport: TRANSPORT, capabilities: { claude: 'requires-runtime-verification', codex: 'requires-runtime-verification', openclaw: 'plugin-bridge', managedDepth: 1, modelSelection: true, artifactInputs: true, boundedResume: true, claudeBuildTest: true, attentionDelivery: true, inputVersionedResponses: true, hostDeliveryReceiptVersion: 1, exclusiveDeliverySender: true, researchCapabilitySnapshots: true } }),
   bridgeBind: p => engine.bindOpenClaw(p), bridgePulse: () => engine.db.put('meta', { id: 'bridge-health', at: engine.now() }),
   bridgeAllBindings: () => engine.db.all('bridge').filter(b => !b.suspended),
   bridgeBindings: () => engine.now() - (engine.db.get('meta', 'bridge-health')?.at || 0) < 15000 ? engine.db.all('bridge').filter(b => !b.suspended) : [],
-  bridgePending: () => engine.openClawPending(), bridgeWake: p => engine.openClawWake(p.id, p.attemptId, p.error, p.finalVersion, p.attentionVersion),
+  bridgePending: p => engine.openClawPending(!!p?.includeRecovery), bridgeWake: p => engine.openClawWake(p.id, p.attemptId, p.error, p.finalVersion, p.attentionVersion),
+  bridgeClaimDelivery: p => { const v = assertHostRequest(engine.hostReceiptKey, 'bridgeClaimDelivery', p); return engine.claimDelivery(v.id, v.kind, v.version, v.owner); },
+  bridgeReadDelivery: p => { const v=assertHostRequest(engine.hostReceiptKey,'bridgeReadDelivery',p);return engine.readDeliveryForRecovery(v.id,v.kind,v.version,v.owner); },
+  bridgeBeginDelivery: p => { const v = assertHostRequest(engine.hostReceiptKey, 'bridgeBeginDelivery', p); return engine.beginDelivery(v.id, v.kind, v.version, v.owner, v.claimToken); },
+  bridgeSettleDelivery: p => { const v = assertHostRequest(engine.hostReceiptKey, 'bridgeSettleDelivery', p); return engine.settleDelivery(v.receipt); },
   bridgeSuspend: p => engine.suspendOpenClaw(p.bindingId, p.reason),
   bridgeGet: p => { engine.authorizeOpenClaw(p.id, p.owner); return engine.get(p.id); },
   bridgeQuery: p => {
@@ -54,9 +59,9 @@ const methods = {
   dashboard: p => projectDashboard(engine.querySource(p.id, { view: 'dashboard' })),
   dashboardList: () => projectDashboardList(engine.list()),
   bridgeDecide: p => engine.openClawDecide(p.id, p.owner, p.attemptId, p.generation, p.decision),
-  bridgeAction: p => { engine.authorizeOpenClaw(p.id, p.owner); if (!['cancel', 'respond', 'resume', 'ack', 'ack_attention'].includes(p.action)) throw new Error('Invalid bridge action'); return engine[p.action === 'ack_attention' ? 'ackAttention' : p.action](p.id, p.action === 'respond' ? p.message : p.action === 'resume' ? p.request : p.version, p.owner); },
+  bridgeAction: p => { engine.authorizeOpenClaw(p.id, p.owner); if (!['cancel', 'respond', 'resume', 'ack', 'ack_attention'].includes(p.action)) throw new Error('Invalid bridge action'); return engine[p.action === 'ack_attention' ? 'ackAttention' : p.action](p.id, ['respond', 'resume'].includes(p.action) ? p.request : p.version, p.owner); },
   submit: p => engine.submit(p), list: () => engine.list(), get: p => engine.get(p.id), output: p => engine.output(p.id, p.attemptId),
-  cancel: p => engine.cancel(p.id), respond: p => engine.respond(p.id, p.message), resume: p => engine.resume(p.id, p.request), ack: p => engine.ack(p.id, p.version),
+  cancel: p => engine.cancel(p.id), respond: p => engine.respond(p.id, p.request), resume: p => engine.resume(p.id, p.request), ack: p => engine.ack(p.id, p.version),
 };
 const server = net.createServer(connection => {
   let chunks = [], bytes = 0, handled = false, negotiated = false;

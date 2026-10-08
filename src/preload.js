@@ -17,7 +17,7 @@ contextBridge.exposeInMainWorld('api', {
   tasksChooseProject: (current) => ipcRenderer.invoke('tasksChooseProject', current),
   tasksCancel: (id) => ipcRenderer.invoke('tasksCancel', id),
   tasksResume: (id, request) => ipcRenderer.invoke('tasksResume', id, request),
-  tasksRespond: (id, message) => ipcRenderer.invoke('tasksRespond', id, message),
+  tasksRespond: (id, request) => ipcRenderer.invoke('tasksRespond', id, request),
   setActive: (tool, name) => ipcRenderer.invoke('setActive', tool, name),
   addProfile: (tool, name, opts) => ipcRenderer.invoke('addProfile', tool, name, opts),
   removeProfile: (tool, name) => ipcRenderer.invoke('removeProfile', tool, name),

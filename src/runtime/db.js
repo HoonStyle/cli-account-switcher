@@ -8,11 +8,23 @@ class Ledger {
     this.db = new DatabaseSync(path.join(dir, 'tasks.sqlite'));
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;');
     const version = this.db.prepare('PRAGMA user_version').get().user_version;
-    if (version > 1) throw new Error('Unsupported runtime schema; refusing to modify');
+    if (version > 2) { this.db.close(); throw new Error('Unsupported runtime schema; refusing to modify'); }
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
     this.db.exec(`CREATE TABLE IF NOT EXISTS records (kind TEXT NOT NULL, id TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY(kind,id));
       CREATE TABLE IF NOT EXISTS requests (id TEXT PRIMARY KEY, digest TEXT NOT NULL, rootId TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, rootId TEXT NOT NULL, at INTEGER NOT NULL, type TEXT NOT NULL, body TEXT NOT NULL);
-      PRAGMA user_version=1;`);
+      `);
+      if (version < 2) {
+        const { migrateRootDelivery } = require('./delivery-state');
+        for (const root of this.all('root')) {
+          for (const notice of migrateRootDelivery(root)) this.put('delivery', notice);
+          this.put('root', root);
+        }
+        this.db.exec('PRAGMA user_version=2');
+      }
+      this.db.exec('COMMIT');
+    } catch (error) { this.db.exec('ROLLBACK'); this.db.close(); throw error; }
   }
   get(kind, id) { const r = this.db.prepare('SELECT body FROM records WHERE kind=? AND id=?').get(kind, id); return r ? JSON.parse(r.body) : null; }
   all(kind) { return this.db.prepare('SELECT body FROM records WHERE kind=? ORDER BY rowid').all(kind).map(r => JSON.parse(r.body)); }

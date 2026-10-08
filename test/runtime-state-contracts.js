@@ -5,8 +5,13 @@ const { randomUUID } = require('crypto');
 const { Engine } = require('../src/runtime/engine');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'state-contracts-'));
 let now = Date.now(), e = new Engine(tmp, { now: () => now });
-const owner = { agentId: 'fixture', sessionKey: 'agent:fixture:channel:fixture', sessionId: 'session' };
+const owner = { agentId: 'fixture', sessionKey: 'agent:fixture:channel:fixture', sessionId: 'session', deliveryTarget: {channel:'discord',accountId:'default',to:'channel:fixture'} };
 const b = e.bindOpenClaw(owner);
+function delivered(id, version) {
+  const n=e.claimDelivery(id,'attention',version,owner); if(!n) return;
+  const proof={deliveryId:n.id,rootId:id,kind:'attention',version,generation:n.generation,claimToken:n.claimToken,payloadHash:n.payloadHash,owner:n.owner,outcome:'sent',receiptVersion:1,channel:'discord',accountId:'default',destination:'channel:fixture',parts:[{messageId:'fixture-'+n.id,index:0,kind:'text'}]};
+  e.beginDelivery(id,'attention',version,owner,n.claimToken); e.settleDelivery(require('../src/runtime/bridge-auth').signDeliveryReceipt(tmp,proof));
+}
 const coordinator = { tool: 'openclaw', bindingId: b.id, ...owner };
 function root() { const r = { id: randomUUID(), coordinator, participants: [], goal: 'fixture', projectPath: tmp, permission: 'read-only', executionPolicy: 'edit-only', generation: 1, status: 'running', attention: null, round: 1, maxRounds: 3, finalVersion: 0 }; e.saveRoot(r); return r; }
 function child(r, state = 'running') {
@@ -45,11 +50,11 @@ const blocked = a => e.consume(a, { attemptId: a.id, token: a.token, state: 'blo
   const r = root(), { a } = child(r, 'starting'); blocked(a);
   const attention = e.openClawPending().find(p => p.rootId === r.id);
   assert.equal(attention.kind, 'attention'); assert.equal(attention.attentionVersion, 1);
-  e.openClawWake(r.id, undefined, 'fixture wake failure', undefined, 1);
-  const retryAt = e.root(r.id).nextAttentionWakeAt;
-  assert.equal(e.get(r.id).root.observation.errors.find(x => x.kind === 'attention_wake').message, 'fixture wake failure');
+  assert.throws(() => e.openClawWake(r.id, undefined, 'fixture wake failure', undefined, 1), /host delivery path/);
   e.db.close(); e = new Engine(tmp, { now: () => now });
-  assert.equal(e.openClawPending().find(p => p.rootId === r.id).nextWakeAt, retryAt);
+  assert.equal(e.openClawPending().find(p => p.rootId === r.id).noticeState, 'pending');
+  assert.throws(() => e.ackAttention(r.id, 1, owner), /verified host delivery receipt/);
+  delivered(r.id, 1);
   assert.throws(() => e.ackAttention(r.id, 1, { ...owner, agentId: 'foreign' }), /binding mismatch/);
   assert.throws(() => e.ackAttention(r.id, 2, owner), /no longer pending/);
   e.ackAttention(r.id, 1, owner); e.ackAttention(r.id, 1, owner);
@@ -60,7 +65,7 @@ const blocked = a => e.consume(a, { attemptId: a.id, token: a.token, state: 'blo
   e.db.transaction(() => e.requestInput(changed, { kind: 'coordinator', reason: 'different blocker', sourceAttemptId: 'next-main' }));
   assert.equal(e.root(r.id).attentionVersion, 2); assert.equal(e.root(r.id).attentionDelivery, 'pending');
   assert.throws(() => e.ackAttention(r.id, 1, owner), /no longer pending/);
-  e.openClawWake(r.id, undefined, undefined, undefined, 1); assert.equal(e.root(r.id).attentionWakeAttempts, undefined);
+  assert.throws(() => e.openClawWake(r.id, undefined, undefined, undefined, 1), /host delivery path/); assert.equal(e.root(r.id).attentionWakeAttempts, undefined);
   e.suspendOpenClaw(b.id, 'disable'); assert(!e.openClawPending().some(p => p.rootId === r.id));
   assert.throws(() => e.ackAttention(r.id, 2, owner), /binding mismatch/);
   e.bindOpenClaw(owner); assert(e.openClawPending().some(p => p.rootId === r.id));
@@ -69,7 +74,7 @@ const blocked = a => e.consume(a, { attemptId: a.id, token: a.token, state: 'blo
   const oldRoot = root(); oldRoot.status = 'needs_user'; oldRoot.attention = 'legacy blocked'; e.db.put('root', oldRoot); e.tick();
   assert.equal(e.openClawPending().find(p => p.rootId === oldRoot.id).attentionVersion, 1);
   assert.equal(e.root(oldRoot.id).inputRequest.reason, 'legacy blocked');
-  console.log('PASS durable attention version/backoff, exact owner ack without completion, reissue, stale receipts, disable/reconnect/cancel and legacy upgrade');
+  console.log('PASS durable attention version/host receipt, exact owner ack without completion, reissue, stale receipts, disable/reconnect/cancel and legacy upgrade');
 
   const concurrent = root(), first = child(concurrent, 'starting'), other = child(concurrent, 'starting');
   blocked(first.a);
@@ -85,13 +90,13 @@ const blocked = a => e.consume(a, { attemptId: a.id, token: a.token, state: 'blo
   assert.deepEqual(e.root(concurrent.id).inputRequest, requested);
   assert.equal(e.root(concurrent.id).attentionVersion, 1);
   assert(e.openClawPending().some(p => p.rootId === concurrent.id && p.kind === 'attention'));
-  e.ackAttention(concurrent.id, 1, owner);
+  delivered(concurrent.id,1); e.ackAttention(concurrent.id, 1, owner);
   assert.equal(e.root(concurrent.id).status, 'needs_user');
   console.log('PASS unrelated bad/valid receipts cannot replace, acknowledge, supersede or clear a user-input request');
 
   const cumulative = root(), one = child(cumulative, 'starting'), two = child(cumulative, 'starting');
   blocked(one.a); const firstRequest = e.root(cumulative.id).inputRequest;
-  e.ackAttention(cumulative.id, firstRequest.version, owner);
+  delivered(cumulative.id,firstRequest.version); e.ackAttention(cumulative.id, firstRequest.version, owner);
   blocked(two.a); const secondRequest = e.root(cumulative.id).inputRequest;
   assert.equal(secondRequest.reason, firstRequest.reason);
   assert.equal(secondRequest.version, firstRequest.version + 1);
@@ -120,22 +125,22 @@ const blocked = a => e.consume(a, { attemptId: a.id, token: a.token, state: 'blo
   e.db.put('root', acknowledgedLegacy); e.tick();
   assert.equal(e.root(acknowledgedLegacy.id).inputRequest.reason, question);
   assert.equal(e.root(acknowledgedLegacy.id).attentionVersion, 7);
-  assert.equal(e.root(acknowledgedLegacy.id).attentionDelivery, 'delivered');
+  assert.equal(e.root(acknowledgedLegacy.id).attentionDelivery, 'unknown');
   assert.equal(e.root(acknowledgedLegacy.id).nextAttentionWakeAt, now + 10000);
   assert(!e.openClawPending().some(p => p.rootId === acknowledgedLegacy.id));
-  console.log('PASS coordinator text is never parsed as diagnostics, requests survive restart, legacy delivery/version/backoff are preserved');
+  console.log('PASS coordinator text is never parsed as diagnostics, requests survive restart, legacy versions are preserved and unverified delivery quarantined');
 
   for (const clockDelta of [0, -10000]) {
     const retryRoot = root(), initial = child(retryRoot, 'starting'); blocked(initial.a);
     now += clockDelta;
-    e.resume(retryRoot.id, { requestId: randomUUID(), message: 'Explicit retry', retryTaskIds: [initial.t.id] }, owner);
+    e.resume(retryRoot.id, { generation:1,inputVersion:e.root(retryRoot.id).inputRequest.version,requestId: randomUUID(), message: 'Explicit retry', retryTaskIds: [initial.t.id] }, owner);
     let task = e.db.get('task', initial.t.id), attempt = e.db.get('attempt', task.currentAttemptId);
     assert.equal(attempt.retryOf, initial.a.id);
     assert.equal(e.get(retryRoot.id).tasks[0].observation.latestAttemptId, attempt.id);
     assert.equal(e.get(retryRoot.id).tasks[0].observation.executionState, 'queued');
     attempt.state = 'starting'; attempt.token = randomUUID(); e.db.put('attempt', attempt);
     blocked(attempt);
-    e.resume(retryRoot.id, { requestId: randomUUID(), message: 'Second explicit retry', retryTaskIds: [initial.t.id] }, owner);
+    e.resume(retryRoot.id, { generation:1,inputVersion:e.root(retryRoot.id).inputRequest.version,requestId: randomUUID(), message: 'Second explicit retry', retryTaskIds: [initial.t.id] }, owner);
     task = e.db.get('task', initial.t.id); const next = e.db.get('attempt', task.currentAttemptId);
     assert.equal(next.retryOf, attempt.id, 'Retry validation and display use the same current attempt identity');
     next.state = 'running'; e.db.put('attempt', next);
@@ -154,7 +159,7 @@ const blocked = a => e.consume(a, { attemptId: a.id, token: a.token, state: 'blo
   e.flushNotices(); const failedNotice = e.db.all('notice').find(n => n.rootId === notificationRoot.id);
   assert.equal(failedNotice.state, 'retrying');
   const requestBeforeAck = e.root(notificationRoot.id).inputRequest;
-  e.ackAttention(notificationRoot.id, 1, owner);
+  delivered(notificationRoot.id,1); e.ackAttention(notificationRoot.id, 1, owner);
   assert.equal(e.db.get('notice', failedNotice.id).state, 'superseded');
   now = failedNotice.nextAt + 1; const sentBefore = notices; e.flushNotices();
   assert.equal(notices, sentBefore, 'Chat delivery acknowledgment suppresses pending OS retries');
@@ -169,7 +174,7 @@ const blocked = a => e.consume(a, { attemptId: a.id, token: a.token, state: 'blo
   const pendingRoot = root(), pendingChild = child(pendingRoot, 'starting'); blocked(pendingChild.a);
   let finishNotification;
   e.attention = r => r.id === pendingRoot.id ? new Promise((_resolve, reject) => { finishNotification = reject; }) : undefined;
-  e.flushNotices(); e.ackAttention(pendingRoot.id, 1, owner);
+  e.flushNotices(); delivered(pendingRoot.id,1); e.ackAttention(pendingRoot.id, 1, owner);
   finishNotification(Error('late OS failure')); await Promise.resolve();
   assert.equal(e.db.all('notice').find(n => n.rootId === pendingRoot.id).state, 'superseded');
   console.log('PASS chat ack suppresses pending/in-flight OS retries; legacy migration replaces rather than duplicates unversioned notices');

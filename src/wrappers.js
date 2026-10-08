@@ -101,6 +101,7 @@ process.stdin.on('end', () => {
 }
 
 function installShims() {
+  if (!fs.existsSync(path.join(__dirname,'runtime/research-mcp.bundle.cjs'))) throw Error('Research helper bundle missing; build:research is required before installation');
   fs.mkdirSync(P.BIN_DIR, { recursive: true, mode: 0o755 });
   const state = store.load();
   state.realBin = state.realBin || {};

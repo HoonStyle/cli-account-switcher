@@ -3,7 +3,7 @@
 // Keep client preflight and server enforcement on the same wire contract.
 const REQUEST_LIMIT = 1024 * 1024;
 const RESPONSE_LIMIT = 8 * 1024 * 1024;
-const PROTOCOL_VERSION = 2;
+const PROTOCOL_VERSION = 3;
 const HELLO_METHOD = 'hello';
 const TRANSPORT = Object.freeze({ protocolVersion: PROTOCOL_VERSION, requestMaxBytes: REQUEST_LIMIT, responseMaxBytes: RESPONSE_LIMIT, encoding: 'utf8', framing: 'newline-json', mutationHandshake: 'same-connection' });
 // Everything else (including unknown future methods) requires negotiation.

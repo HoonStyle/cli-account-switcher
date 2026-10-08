@@ -20,7 +20,7 @@
 
 CLI Account Switch는 Claude Code와 Codex CLI의 여러 로컬 계정 프로필을 관리하는 Electron 데스크톱 앱입니다. 프로필마다 설정 홈을 분리하고, 선택한 프로필로 공식 CLI를 실행합니다. 로그인과 모델 요청은 사용자가 설치한 공식 CLI가 처리합니다.
 
-> **Preview** — 현재 버전은 `0.2.0-preview.9`입니다. 서명·공증된 설치 파일은 아직 제공하지 않습니다. Windows 빌드 설정은 포함되어 있으나 Windows에서 관리형 작업 실행은 지원하지 않습니다. [릴리스 노트](docs/releases/v0.2.0-preview.9.md).
+> **Preview** — 현재 버전은 `0.2.0-preview.10`입니다. 서명·공증된 설치 파일은 아직 제공하지 않습니다. Windows 빌드 설정은 포함되어 있으나 Windows에서 관리형 작업 실행은 지원하지 않습니다. [릴리스 노트](docs/releases/v0.2.0-preview.10.md).
 
 ## 화면 미리보기
 
@@ -218,6 +218,10 @@ openclaw plugins install ./plugins/openclaw
 - 작업 결과 전달에는 명시적인 확인이 필요합니다. 전송과 확인 사이의 결과가 불명확한 경우 정확히 한 번 전달을 보장하지 않습니다.
 - `account_tasks get`은 짧은 요약을 반환합니다. 전체 근거는 `context`, `task`, `final` 보기에서 반환된 `nextOffset`과 `queryRevision`으로 이어 읽으십시오. 요약만으로 검토를 완료하지 않습니다.
 - 대시보드는 읽기 전용 Gateway 조회로 최근 OpenClaw 활동을 별도로 표시합니다. 연결이 끊긴 기록은 이전 기록으로 표시하며, 실행 종료를 사용자 목표 완료로 간주하지 않습니다.
+
+### preview.10 구조 계약
+
+질문에 표시된 generation·inputVersion으로 답변을 확인하고, 연동 결과는 인증된 호스트 영수증으로 전달을 확인합니다. 전송 여부가 불명확하면 재전송하지 않고 영수증을 조회합니다. DB 스키마 2·변경 프로토콜 3을 사용하므로 앱·서비스·플러그인을 함께 업데이트하세요. 선택형 OpenClaw 연동에는 대응 SDK(`sendSessionBoundMessageBatch`, `readSessionBoundMessageReceipt`, 원자적 workflow-injection 경계), Core agent 스키마 25·native record V2가 추가로 필요합니다. 매니페스트 최소 버전만으로 호환성을 보장하지 않으며 호스트 수정은 설치 파일에 포함되지 않습니다. [업데이트 안내](docs/releases/v0.2.0-preview.10.md)를 확인하세요.
 
 ### preview.9 런타임 계약 변경
 

@@ -5,6 +5,11 @@ const base = path.resolve(__dirname, '..');
 const edition = require('../src/edition.json');
 assert.equal(edition.name, 'distribution'); assert.equal(edition.directUsageApi, false);
 assert.equal(edition.credentialMetadata, false);
+for (const command of Object.values(require('../package.json').scripts)) {
+  for (const match of command.matchAll(/(?:node|electron)\s+((?:test|scripts)\/[\w./-]+\.js)/g)) {
+    assert(fs.existsSync(path.join(base, match[1])), `Missing exported script: ${match[1]}`);
+  }
+}
 for (const name of ['usage-api.js', 'claude-cred.js', 'codex-identity.js', 'gemini.js', 'claude-refresh.js']) {
   assert(!fs.existsSync(path.join(base, 'src', name)), `${name} must not ship`);
 }
