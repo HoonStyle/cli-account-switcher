@@ -1,5 +1,6 @@
 'use strict';
 const path = require('path');
+const fs = require('fs');
 const { spawn } = require('child_process');
 const P = require('./paths');
 const store = require('./store');
@@ -14,7 +15,11 @@ function openLoginTerminal(tool, home, isDefault) {
   const env = launchEnv(binding);
   // Pass only a validated profile ID through the terminal; the runner resolves the real
   // executable directly, so an active-account shim can never redirect a login.
-  const runner = path.join(__dirname, 'launch', 'run.js');
+  // System Node cannot read Electron ASAR archives. Use the runtime extracted
+  // by installShims at app startup; never redirect a login to another profile.
+  const packaged = /(?:^|[\\/])[^\\/]+\.asar(?:[\\/]|$)/.test(__dirname);
+  const runner = path.join(packaged ? P.LIB_DIR : __dirname, 'launch', 'run.js');
+  if (!fs.existsSync(runner)) throw new Error('Login runtime missing. Reinstall CLI wrappers and retry.');
   if (P.IS_WIN) {
     // cmd metacharacters in filesystem paths cannot be forwarded safely through start.
     if (/["% !&|<>^\r\n]/.test(id) || /["%!&|<>^\r\n]/.test(runner)) throw new Error('Use CLI login for this Windows profile path');

@@ -20,7 +20,7 @@
 
 CLI Account Switch는 Claude Code와 Codex CLI의 여러 로컬 계정 프로필을 관리하는 Electron 데스크톱 앱입니다. 프로필마다 설정 홈을 분리하고, 선택한 프로필로 공식 CLI를 실행합니다. 로그인과 모델 요청은 사용자가 설치한 공식 CLI가 처리합니다.
 
-> **Preview** — 현재 버전은 `0.2.0-preview.10`입니다. 서명·공증된 설치 파일은 아직 제공하지 않습니다. Windows 빌드 설정은 포함되어 있으나 Windows에서 관리형 작업 실행은 지원하지 않습니다. [릴리스 노트](docs/releases/v0.2.0-preview.10.md).
+> **Preview** — 현재 버전은 `0.2.0-preview.11`입니다. 서명·공증된 설치 파일은 아직 제공하지 않습니다. Windows 빌드 설정은 포함되어 있으나 Windows에서 관리형 작업 실행은 지원하지 않습니다. [릴리스 노트](docs/releases/v0.2.0-preview.11.md).
 
 ## 화면 미리보기
 
