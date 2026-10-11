@@ -59,9 +59,19 @@ try {
   require('../src/wrappers').installShims();
   const installedState = store.load(); installedState.realBin.codex = probe; store.save(installedState);
   for (const cli of [path.resolve(__dirname, '../src/cli.js'), path.join(P.LIB_DIR, 'cli.js')]) {
+    const before = fs.readFileSync(P.STATE_FILE, 'utf8');
+    const activeBefore = fs.readFileSync(path.join(P.ACTIVE_DIR, 'codex'), 'utf8');
     const cliResult = spawnSync(process.execPath, [cli, 'run', 'codex', '--profile', 'work', '--', ...args], { encoding: 'utf8', env: process.env });
     assert.equal(cliResult.status, 0, cliResult.stderr);
     assert.deepEqual(JSON.parse(cliResult.stdout).argv, args);
+    assert.equal(JSON.parse(cliResult.stdout).home, fixed.home);
+    for (const profile of ['missing-profile', '../escape']) {
+      const rejected = spawnSync(process.execPath, [cli, 'run', 'codex', '--profile', profile, '--', ...args], { encoding: 'utf8', env: process.env });
+      assert.notEqual(rejected.status, 0);
+      assert.equal(rejected.stdout, '');
+    }
+    assert.equal(fs.readFileSync(P.STATE_FILE, 'utf8'), before);
+    assert.equal(fs.readFileSync(path.join(P.ACTIVE_DIR, 'codex'), 'utf8'), activeBefore);
     const bad = spawnSync(process.execPath, [cli, 'run', 'codex', '--profile', '--'], { encoding: 'utf8', env: process.env });
     assert.notEqual(bad.status, 0);
   }

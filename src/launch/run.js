@@ -36,7 +36,7 @@ function execute(binding, argv) {
   });
 }
 
-async function runCommand(args) {
+async function runCommand(args, { requireProfile = false } = {}) {
   const [tool, ...rest] = args;
   let profile;
   let offset = 0;
@@ -44,6 +44,7 @@ async function runCommand(args) {
     if (!rest[1] || rest[1] === '--') throw new Error('--profile requires an account ID');
     profile = rest[1]; offset = 2;
   }
+  if (requireProfile && !profile) throw new Error('Delegation requires --profile <id>; inspect cli-accounts list --json in the intended installation. Never use/switch the active account or substitute another profile.');
   if (rest[offset] !== '--') throw new Error('Usage: run <tool> [--profile id] -- <literal args>');
   return execute(resolveProfile(tool, profile), rest.slice(offset + 1));
 }

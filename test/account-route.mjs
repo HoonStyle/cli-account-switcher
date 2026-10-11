@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import { accountRoute, assertParticipants } from '../plugins/openclaw/account-route.mjs';
+import { projectQuery } from '../plugins/openclaw/task-query.mjs';
+const state = { codex: { active: 'a', profiles: ['a', 'b'] }, claude: { active: 'default', profiles: ['default'] } };
+const store = { load: () => structuredClone(state) };
+const runtime = { edition: 'distribution', dataRoot: '/fixture/distribution' };
+const before = JSON.stringify(state);
+assertParticipants([{ tool: 'codex', profileId: 'b' }], store, runtime);
+assert.throws(() => assertParticipants([{ tool: 'codex', profileId: 'personal-only' }], store, runtime), { code: 'PROFILE_NOT_IN_INSTALLATION' });
+assert.throws(() => assertParticipants([{ tool: 'codex' }], store, runtime), { code: 'PROFILE_NOT_IN_INSTALLATION' });
+assert.equal(JSON.stringify(state), before);
+const route = accountRoute(store, runtime);
+assert.equal(route.installation.dataRoot, runtime.dataRoot);
+assert.equal(route.execution.fallbackToActive, false);
+const reply = projectQuery({ binding: {id:'fixture'}, ...route }, {action:'connect'}, runtime);
+assert.deepEqual(reply.installation, route.installation);
+assert.deepEqual(reply.execution, route.execution);
+console.log('account route: all checks passed');

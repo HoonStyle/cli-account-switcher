@@ -20,7 +20,7 @@ Local profiles · CLI launches · Usage records · Managed tasks
 
 CLI Account Switch is an Electron desktop app for managing multiple local Claude Code and Codex CLI profiles. It separates configuration homes and launches each official CLI with the selected profile. The official CLIs handle sign-in and model requests.
 
-> **Preview** — Current version: `0.2.0-preview.11`. Signed and notarized installers are not yet available. Windows build configuration is included, but managed task execution on Windows is not supported. [Release notes](docs/releases/v0.2.0-preview.11.md).
+> **Preview** — Current version: `0.2.0-preview.12`. Signed and notarized installers are not yet available. Windows build configuration is included, but managed task execution on Windows is not supported. [Release notes](docs/releases/v0.2.0-preview.12.md).
 
 ## Screenshots
 
@@ -274,3 +274,39 @@ Manual dispatch (`workflow_dispatch`) builds installers and retains artifacts fo
 [MIT License](LICENSE) · Copyright (c) 2026 HoonStyle
 
 External CLIs and services remain subject to their own licenses and terms.
+
+### Delegating with an explicit account
+
+Account delegation selects a profile **for that task**, not a global `use`/`switch`.
+Call OpenClaw `account_tasks(action="connect")` first: `installation` identifies
+its edition/data root and `accounts` lists valid `participants[].profileId` values.
+Missing profiles fail before submission with `PROFILE_NOT_IN_INSTALLATION`; never
+substitute the active account, copy credentials, or reconfigure the Gateway.
+For a different installation, inspect that installation's absolute CLI path with
+`--help` and `list`, then run:
+
+```sh
+/path/to/cli-accounts run codex --profile <id> -- exec -m <model> '<prompt>'
+```
+
+Global activation stays unchanged. Direct CLI thread IDs are not managed task IDs;
+direct runs are not automatically imported into the managed task list. Separate
+installation task stores are not automatically merged.
+
+### Claude Code / Codex: per-task delegation
+
+```sh
+cli-accounts list --json
+cli-accounts delegate claude --profile <id> -- <official-cli-args...>
+cli-accounts delegate codex --profile <id> -- <official-cli-args...>
+```
+
+`delegate` requires an explicit profile and never changes the active account.
+The same commands work from Claude Code, Codex, OpenClaw, or a terminal.
+Use the CLI belonging to the intended installation; `list --json` reports its
+storage root and profile IDs without reading credentials. A missing profile or
+failed child process never falls back to the active account. `use`/`switch` is
+only for an explicit global-switch request. Existing `run --profile` remains
+supported. Direct runs return CLI output/exit status, not managed task receipts.
+Repository agent instructions are in `AGENTS.md` and `CLAUDE.md`; they are not
+silently installed into users' global agent configuration.

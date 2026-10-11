@@ -57,6 +57,15 @@ const shown = (p) => (p.label !== p.name ? `${p.label} (${p.name})` : p.name);
 
 function cmdList() {
   const ts = a1 ? [tool(a1)] : TOOLS;
+  if (flags.has('--json')) {
+    const state = store.load();
+    console.log(JSON.stringify({
+      installation: { edition: edition.name || edition.dataDirectory, dataRoot: P.ROOT },
+      execution: { command: 'delegate', profileRequired: true, changesActiveAccount: false, fallbackToActive: false },
+      accounts: ts.flatMap(t => state[t].profiles.map(profileId => ({ tool: t, profileId, active: state[t].active === profileId }))),
+    }, null, 2));
+    return;
+  }
   for (const t of ts) {
     console.log(`${t}:`);
     for (const p of profiles(t)) {
@@ -201,10 +210,11 @@ function cmdPath() {
 function help() {
   console.log(`cli-accounts <command>
   도구: claude | codex
+  delegate <tool> --profile <id> -- <args...> 작업별 위임 (프로필 필수, 전역 전환 금지)
   run <tool> [--profile <id>] -- <args...>  활성 계정 변경 없이 고정 실행
   dashboard [--port N] [--public-origin URL] 로컬 웹 작업 관리
   tasks                                   독립 작업 서비스와 관리형 위임
-  list  [tool]                             계정 목록과 활성 표시
+  list  [tool] [--json]                    계정 목록; JSON은 설치본·저장소·프로필 ID 포함
   use   <claude|codex> <name>              활성 계정 전환
   usage [claude|codex] [name|--all] ${edition.directUsageApi ? '[--api [--force]] ' : ''}[--used|--remaining] [--json]   사용량·리셋 시각
 ${edition.directUsageApi ? '  api   [on|off] | interval <분>           서버 사용량 조회 켜기/끄기 · 자동 조회 간격 · 계정별 조회 이력\n' : ''}  display [used|remaining]                 사용한 비율 / 남은 비율 표시 기본값
@@ -214,11 +224,14 @@ ${edition.directUsageApi ? '  api   [on|off] | interval <분>           서버 �
   rename <claude|codex> <name> <new-name>  표시 이름 변경 (폴더·로그인은 그대로)
   login <claude|codex> [name] [--open]     로그인 명령 출력 (--open: 새 터미널 창)
   path  [register]                         래퍼 PATH 상태 확인 / 셸 설정에 등록
-한 번만 다른 계정으로 실행: CLAUDE_PROFILE=work claude / CODEX_PROFILE=work codex`);
+다른 계정에 작업 위임: list --json → delegate <tool> --profile <id> -- <args...>
+요청한 프로필이 없으면 중단하고 설치본을 확인하세요. use/switch로 대체하거나 인증 정보를 복사하지 마세요.
+직접 실행 결과는 공식 CLI 출력이며 관리형 task ID가 아닙니다.`);
 }
 
 (async () => {
   try {
+    if (argv[0] === 'delegate') { await require('./launch/run').runCommand(argv.slice(1), { requireProfile: true }); return; }
     if (argv[0] === 'run') { await require('./launch/run').runCommand(argv.slice(1)); return; }
     if (argv[0] === 'dashboard') { await require('./dashboard/server').run(argv.slice(1)); return; }
     if (argv[0] === 'tasks') { await require('./runtime/cli').run(argv.slice(1)); return; }

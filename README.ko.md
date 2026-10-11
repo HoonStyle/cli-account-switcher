@@ -20,7 +20,7 @@
 
 CLI Account Switch는 Claude Code와 Codex CLI의 여러 로컬 계정 프로필을 관리하는 Electron 데스크톱 앱입니다. 프로필마다 설정 홈을 분리하고, 선택한 프로필로 공식 CLI를 실행합니다. 로그인과 모델 요청은 사용자가 설치한 공식 CLI가 처리합니다.
 
-> **Preview** — 현재 버전은 `0.2.0-preview.11`입니다. 서명·공증된 설치 파일은 아직 제공하지 않습니다. Windows 빌드 설정은 포함되어 있으나 Windows에서 관리형 작업 실행은 지원하지 않습니다. [릴리스 노트](docs/releases/v0.2.0-preview.11.md).
+> **Preview** — 현재 버전은 `0.2.0-preview.12`입니다. 서명·공증된 설치 파일은 아직 제공하지 않습니다. Windows 빌드 설정은 포함되어 있으나 Windows에서 관리형 작업 실행은 지원하지 않습니다. [릴리스 노트](docs/releases/v0.2.0-preview.12.md).
 
 ## 화면 미리보기
 
@@ -274,3 +274,35 @@ npm run dist:win   # Windows NSIS 설치 파일 및 portable 빌드
 [MIT License](LICENSE) · Copyright (c) 2026 HoonStyle
 
 외부 CLI와 서비스에는 각 제공자의 라이선스 및 이용약관이 별도로 적용됩니다.
+
+### 에이전트의 다른 프로필 지정 실행
+
+다른 프로필로 위임하는 요청은 **작업별 프로필 지정**입니다. `use`/`switch`로 전역 활성 계정을 바꾸지 않습니다.
+
+- OpenClaw에서는 먼저 `account_tasks(action="connect")`의 `installation`(edition/dataRoot)과 `accounts`를 확인하고, `participants[].profileId`를 명시합니다.
+- 요청 프로필이 해당 설치본에 없으면 `PROFILE_NOT_IN_INSTALLATION`으로 실행 전에 중단합니다. 활성 계정으로 대체하거나 Gateway 재설정·자격 증명 복사로 해결하지 않습니다.
+- 개인용/배포용 설치본은 저장소가 다를 수 있습니다. 의도한 설치본의 CLI 절대 경로로 `--help`와 `list`를 확인한 후 아래처럼 실행합니다.
+
+```sh
+/path/to/cli-accounts run codex --profile <id> -- exec -m <model> '<prompt>'
+```
+
+이 실행은 전역 활성 계정을 변경하지 않습니다. 직접 CLI 실행의 Codex thread ID는 관리형 task ID가 아니며, 관리형 작업 목록에 자동 등록되지 않습니다. 다른 설치본의 작업 저장소를 자동 병합하지 않습니다.
+
+### Claude Code / Codex: 작업별 계정 위임
+
+```sh
+cli-accounts list --json
+cli-accounts delegate claude --profile <id> -- <공식-CLI-인자...>
+cli-accounts delegate codex --profile <id> -- <공식-CLI-인자...>
+```
+
+`delegate`는 프로필 지정을 필수로 요구하며 활성 계정을 변경하지 않습니다.
+Claude Code·Codex·OpenClaw·일반 터미널에서 동일하게 사용할 수 있습니다.
+`list --json`으로 해당 설치본의 저장소 경로와 프로필 ID를 먼저 확인하세요.
+이 조회는 인증 정보를 읽지 않습니다. 없는 프로필이나 실행 실패를 다른 활성
+계정으로 대체하지 않습니다. `use`/`switch`는 전역 전환을 명시적으로 요청한
+경우에만 사용합니다. 기존 `run --profile`도 지원합니다.
+직접 실행은 공식 CLI 출력과 종료 코드를 반환하며 관리형 task ID를 만들지 않습니다.
+레포 에이전트 지침은 `AGENTS.md`와 `CLAUDE.md`에 포함되며 사용자 전역 설정에
+자동으로 설치하지 않습니다.
