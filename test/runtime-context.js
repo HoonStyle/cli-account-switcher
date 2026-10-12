@@ -38,7 +38,7 @@ const spec = path.join(tmp, 'task.json');
 fs.writeFileSync(spec, JSON.stringify({projectPath:project,goal:'Explicit goal',context}));
 const result = spawnSync(process.execPath,[path.resolve(__dirname,'../src/cli.js'),'delegate','codex','--profile','worker','--context',spec,'--','exec','--json','-'],{env:process.env,input:'PIPE_MARKER',encoding:'utf8'});
 assert.equal(result.status,0,result.stderr); const output=JSON.parse(result.stdout);
-assert.equal(output.home,binding.home);assert.equal(output.cwd,project);
+assert.equal(output.home,binding.home);assert.equal(output.cwd,fs.realpathSync(project));
 for (const marker of ['Explicit goal','PIPE_MARKER','PROJECT_MARKER','CONSTRAINT_MARKER','DECISION_MARKER']) assert(output.input.includes(marker),marker);
 assert.deepEqual(output.argv,['exec','--json','-']);assert.deepEqual(fs.readFileSync(P.STATE_FILE),before);
 assert.match(result.stderr,/not a managed task ID/);
