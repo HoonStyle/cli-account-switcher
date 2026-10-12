@@ -39,7 +39,7 @@ const engine = new Engine(dir, { attention: r => {
 } });
 let timer, stopping = false;
 const methods = {
-  health: () => ({ status: 'ok', pid: process.pid, version: 1, appVersion: require('../edition.json').version, edition: require('../edition.json').name, transport: TRANSPORT, capabilities: { claude: 'requires-runtime-verification', codex: 'requires-runtime-verification', openclaw: 'plugin-bridge', managedDepth: 1, modelSelection: true, artifactInputs: true, boundedResume: true, claudeBuildTest: true, attentionDelivery: true, inputVersionedResponses: true, hostDeliveryReceiptVersion: 1, exclusiveDeliverySender: true, researchCapabilitySnapshots: true } }),
+  health: () => ({ status: 'ok', pid: process.pid, version: 1, appVersion: require('../edition.json').version, edition: require('../edition.json').name, transport: TRANSPORT, capabilities: { claude: 'requires-runtime-verification', codex: 'requires-runtime-verification', openclaw: 'plugin-bridge', managedDepth: 1, modelSelection: true, contextSnapshots: true, artifactInputs: true, artifactInputRecovery: true, boundedResume: true, claudeBuildTest: true, attentionDelivery: true, inputVersionedResponses: true, hostDeliveryReceiptVersion: 1, exclusiveDeliverySender: true, researchCapabilitySnapshots: true } }),
   bridgeBind: p => engine.bindOpenClaw(p), bridgePulse: () => engine.db.put('meta', { id: 'bridge-health', at: engine.now() }),
   bridgeAllBindings: () => engine.db.all('bridge').filter(b => !b.suspended),
   bridgeBindings: () => engine.now() - (engine.db.get('meta', 'bridge-health')?.at || 0) < 15000 ? engine.db.all('bridge').filter(b => !b.suspended) : [],

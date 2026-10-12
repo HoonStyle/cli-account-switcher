@@ -20,7 +20,7 @@
 
 CLI Account Switch는 Claude Code와 Codex CLI의 여러 로컬 계정 프로필을 관리하는 Electron 데스크톱 앱입니다. 프로필마다 설정 홈을 분리하고, 선택한 프로필로 공식 CLI를 실행합니다. 로그인과 모델 요청은 사용자가 설치한 공식 CLI가 처리합니다.
 
-> **Preview** — 현재 버전은 `0.2.0-preview.12`입니다. 서명·공증된 설치 파일은 아직 제공하지 않습니다. Windows 빌드 설정은 포함되어 있으나 Windows에서 관리형 작업 실행은 지원하지 않습니다. [릴리스 노트](docs/releases/v0.2.0-preview.12.md).
+> **Preview** — 현재 버전은 `0.2.0-preview.13`입니다. 서명·공증된 설치 파일은 아직 제공하지 않습니다. Windows 빌드 설정은 포함되어 있으나 Windows에서 관리형 작업 실행은 지원하지 않습니다. [릴리스 노트](docs/releases/v0.2.0-preview.13.md).
 
 ## 화면 미리보기
 
@@ -149,6 +149,16 @@ CLI Account Switch
 ```sh
 cli-accounts add codex isolated --no-share
 ```
+
+## 위임 작업의 스킬·맥락 전달
+
+작업실의 **공유할 맥락·스킬**에서 배경, 제약, 결정 사항, 완료 기준과 스킬 이름을 지정할 수 있습니다. CLI/API도 동일한 `context` 객체를 사용합니다. 새 작업에는 프로젝트 최상위 `AGENTS.md`·`CLAUDE.md`가 기본 포함되며 끌 수 있습니다.
+
+선택한 스킬 본문은 실행 프롬프트에 명시적으로 전달하고 보조 파일은 작업별 스냅샷으로 제공합니다. 네이티브 슬래시 명령·사용자 플러그인·훅·MCP를 전부 활성화하는 방식이 아니며, 기존 실행 권한은 유지합니다. 필요한 도구가 없는 스킬은 그 한계를 보고해야 합니다.
+
+관리형 작업은 스킬 버전(SHA256)을 고정해 재개 시에도 같은 내용을 사용합니다. 추가 입력에서는 배경·제약·결정 등을 갱신할 수 있고 맥락 revision과 실제 전달 해시가 실행 기록에 남습니다. 일반 대화 전체나 개인 메모리를 자동 수집하지 않습니다. 선택한 스킬이 없으면 실행 전에 실패합니다.
+
+직접 위임은 `cli-accounts delegate codex --profile 계정ID --context /절대경로/task.json -- exec --json -`를 사용합니다. JSON에는 `projectPath`, `goal`, `context`를 넣습니다. `context`의 필드는 `background`, `status`, `constraints`, `decisions`, `nextSteps`, `completionCriteria`, `files`, `skills`, `projectInstructions`입니다. 문자열 목록은 배열로 작성합니다. Claude는 마지막 공식 CLI 인자를 `-- -p`로 지정합니다. 직접 실행의 context receipt는 관리형 작업 ID가 아니며, 네이티브 세션 ID를 별도로 보존합니다.
 
 ## 작업 맥락 저장과 세션 재개
 

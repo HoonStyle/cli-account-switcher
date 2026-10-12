@@ -60,15 +60,13 @@ function contentHash(manifest, payloads) {
   for (const entry of manifest.files) if (entry.operation === 'write') hash.update(payloads.get(entry.path));
   return hash.digest('hex');
 }
-function captureInputs({ sources, destination, baselineCommit }) {
+function collectInputs({ sources, baselineCommit }) {
   if (!Array.isArray(sources) || !sources.length || sources.length > LIMITS.files) throw Error('Invalid artifact sources');
-  const snapshotDir = path.resolve(destination);
   const entries = new Map(), payloads = new Map(); let total = 0, selected = 0;
   const origins = [];
   for (const source of sources) {
     if (typeof source.taskId !== 'string' || !source.taskId || source.taskId.length > 200 || !Number.isInteger(source.resultVersion) || source.resultVersion < 1 || !Array.isArray(source.paths) || !source.paths.length) throw Error('Invalid artifact source receipt');
     const cwd = rootDir(source.cwd); checkCommit(cwd, baselineCommit);
-    if (snapshotDir === cwd || snapshotDir.startsWith(cwd + path.sep)) throw Error('Artifact snapshot must not mutate its source worktree');
     const paths = source.paths.map(safePath).sort();
     if (new Set(paths).size !== paths.length) throw Error('Duplicate artifact path');
     if ((selected += paths.length) > LIMITS.files) throw Error('Artifact file count limit');
@@ -87,6 +85,17 @@ function captureInputs({ sources, destination, baselineCommit }) {
   origins.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
   const manifest = { version: 1, baselineCommit, sources: origins, files: [...entries.values()].sort((a, b) => a.path.localeCompare(b.path)) };
   const hash = contentHash(manifest, payloads);
+  return { manifest, payloads, hash };
+}
+// Validate a recovery selection without publishing files or changing task state.
+function validateInputFiles(options) { return collectInputs(options).manifest; }
+function captureInputs({ sources, destination, baselineCommit }) {
+  const snapshotDir = path.resolve(destination);
+  const { manifest, payloads, hash } = collectInputs({ sources, baselineCommit });
+  for (const source of sources) {
+    const cwd = rootDir(source.cwd);
+    if (snapshotDir === cwd || snapshotDir.startsWith(cwd + path.sep)) throw Error('Artifact snapshot must not mutate its source worktree');
+  }
   if (fs.existsSync(snapshotDir)) { loadSnapshot(snapshotDir, hash); return { snapshotDir, hash, manifest }; }
   fs.mkdirSync(path.dirname(snapshotDir), { recursive: true, mode: 0o700 });
   const staging = snapshotDir + '.' + randomUUID() + '.tmp'; fs.mkdirSync(staging, { mode: 0o700 });
@@ -152,4 +161,4 @@ function stageInputs({ snapshotDir, destinationWorktree, expectedHash }) {
   for (const entry of manifest.files) if (!stateEqual(inspect(cwd, entry.path), entry.operation === 'delete' ? null : entry)) throw Error('Artifact staging verification failed');
   return { hash: expectedHash, files: manifest.files.map(f => f.path), alreadyStaged: pending.length === 0 };
 }
-module.exports = { captureInputs, stageInputs, LIMITS };
+module.exports = { captureInputs, stageInputs, validateInputFiles, LIMITS };

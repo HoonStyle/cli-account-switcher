@@ -1,5 +1,6 @@
 'use strict';
 const { createHash } = require('node:crypto');
+const { contextReceipt } = require('./context');
 
 // Canonical server-side read projection. The ledger is unchanged; never place
 // full aggregate results, attempt tokens or runner bindings on the query wire.
@@ -78,7 +79,7 @@ function projectQuery(value, params = {}, runtime = {}, options = {}) {
     if (params.resultVersion !== undefined && params.resultVersion !== task.resultVersion) throw Error('Stale resultVersion; get a fresh summary');
     return { ...base, page: page(JSON.stringify(taskData(task)), params, { encoding: 'json', taskId: task.id, resultVersion: task.resultVersion }, options) };
   }
-  if (view === 'context') return { ...base, page: page(JSON.stringify({ goal: r.goal, projectPath: r.projectPath, permission: r.permission, executionPolicy: r.executionPolicy, participants: (r.participants || []).map(participant), inputRequest: inputRequest(r), attention: { reason: inputRequest(r)?.reason || r.attention || null, diagnosticReason: r.attention || null, version: r.attentionVersion || null, delivery: r.attentionDelivery || null, summary: inputRequest(r)?.summary || r.summary || '' }, pending: pending.map(a => ({ ...pick(a, ['id', 'generation', 'purpose']), input: a.input || '' })), coordinatorInstructions: value.coordinatorInstructions || null }), params, { encoding: 'json' }, options) };
+  if (view === 'context') return { ...base, page: page(JSON.stringify({ goal: r.goal, context: r.context, contextUpdates: r.contextUpdates, contextRevision: r.contextRevision, contextSnapshots: r.contextSnapshots?.map(s => contextReceipt(s, { ...r.context, updates: r.contextUpdates || [] }, r.contextRevision)), projectPath: r.projectPath, permission: r.permission, executionPolicy: r.executionPolicy, participants: (r.participants || []).map(participant), inputRequest: inputRequest(r), attention: { reason: inputRequest(r)?.reason || r.attention || null, diagnosticReason: r.attention || null, version: r.attentionVersion || null, delivery: r.attentionDelivery || null, summary: inputRequest(r)?.summary || r.summary || '' }, pending: pending.map(a => ({ ...pick(a, ['id', 'generation', 'purpose']), input: a.input || '' })), coordinatorInstructions: value.coordinatorInstructions || null }), params, { encoding: 'json' }, options) };
   if (view === 'final') {
     if (!r.finalVersion || typeof r.finalResponse !== 'string') throw Error('No final response is available');
     if (params.version !== undefined && params.version !== r.finalVersion) throw Error('Stale finalVersion; get a fresh summary');
@@ -127,6 +128,7 @@ function projectDashboard(value) {
   const binding = b => pick(b, ['id', 'tool', 'profileId', 'model', 'label']);
   const root = { ...pick(r, ['id', 'goal', 'status', 'projectPath', 'permission', 'executionPolicy', 'round', 'maxRounds', 'generation', 'createdAt', 'updatedAt', 'finalResponse', 'finalVersion', 'finalDelivery', 'attention', 'attentionVersion', 'attentionDelivery', 'attentionWakeAttempts', 'nextAttentionWakeAt', 'lastAttentionWakeError', 'lastDeliveryWakeError']),
     coordinator: binding(r.coordinator), participants: (r.participants || []).map(binding), summary: summary.text, summaryTruncated: summary.truncated,
+    context: r.context, contextUpdates: r.contextUpdates, contextRevision: r.contextRevision, contextSnapshots: r.contextSnapshots?.map(s => contextReceipt(s, { ...r.context, updates: r.contextUpdates || [] }, r.contextRevision)),
     inputRequest: inputRequest(r), observation: r.observation };
   const tasks = (value.tasks || []).map(t => {
     const goal = preview(t.goal, 240), summary = preview(t.result?.summary, 1200), reason = preview(t.review?.reason, 500);
@@ -142,7 +144,7 @@ function projectDashboard(value) {
       detailsTruncated, detailRevision: createHash('sha256').update(JSON.stringify(taskData(t))).digest('hex') };
   });
   const attempts = (value.attempts || []).map(a => ({ ...pick(a, ['id', 'rootId', 'taskId', 'role', 'state', 'generation', 'purpose', 'createdAt', 'startedAt', 'endedAt', 'processed']),
-    binding: binding(a.binding), observation: a.observation,
+    binding: binding(a.binding), observation: a.observation, contextReceipt: a.contextReceipt,
     result: a.result ? { ...pick(a.result, ['state', 'processStarted', 'failurePhase']), reason: preview(a.result.reason, 1000).text, exit: pick(a.result.exit, ['code', 'signal']) } : null }));
   const events = (value.events || []).map(event => ({ ...pick(event, ['seq', 'rootId', 'at', 'type']), body: pick(event.body, ['state', 'attemptId', 'taskId', 'version', 'kind', 'role', 'purpose', 'participantId']) }));
   const projected = { schema: 'account-tasks-dashboard-v1', root, tasks, attempts, events, detailsProjected: true };

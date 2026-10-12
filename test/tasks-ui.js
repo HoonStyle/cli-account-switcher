@@ -18,7 +18,7 @@ contextBridge.exposeInMainWorld('fixture',{refresh:()=>notify(state),submitted:(
 app.whenReady().then(async () => {
   const win = new BrowserWindow({ show: false, width: 1100, height: 1000, webPreferences: { preload, contextIsolation: true, nodeIntegration: false } });
   try {
-    await win.loadFile(path.resolve(__dirname, '../src/renderer/tasks.html'));
+    await win.loadFile(process.env.TASK_UI_PATH || path.resolve(__dirname, '../src/renderer/tasks.html'));
     const result = await win.webContents.executeJavaScript(`(async()=>{
       await new Promise(r=>setTimeout(r,80));
       const byId=id=>document.getElementById(id),main=byId('main-tool'),field=byId('main-model');
@@ -32,6 +32,7 @@ app.whenReady().then(async () => {
       const fresh=document.querySelector('#participants .account-row');
       const preserved=fresh.querySelector('input[type=checkbox]').checked&&fresh.querySelector('.participant-model').tagName==='SELECT'&&fresh.querySelector('.participant-model').value==='codex-child';window.fixture.catalog();const missingPreserved=fresh.querySelector('.participant-model').value==='codex-child';
       byId('project').value='/fixture/project';byId('goal').value='Review fixture';
+      byId('context-background').value='공유 배경';byId('context-constraints').value='조건 하나\\n조건 둘';byId('context-decisions').value='결정 하나';byId('context-completion').value='검증 완료';byId('context-skills').value='review, tests';
       byId('submit-form').dispatchEvent(new Event('submit',{cancelable:true}));
       await new Promise(r=>setTimeout(r,30));const cli=window.fixture.submitted();
       change('openclaw');const hidden=byId('main-model-field').hidden&&field.disabled;
@@ -40,11 +41,15 @@ app.whenReady().then(async () => {
       return {noLeak,mainPreserved,profileScoped,profileRestored,missingPreserved,preserved,hidden,cli,external:window.fixture.submitted()};
     })()`);
     assert(result.noLeak && result.mainPreserved && result.profileScoped && result.profileRestored && result.missingPreserved && result.preserved && result.hidden, JSON.stringify(result));
+    assert.equal(result.cli.context.background,'공유 배경');
+    assert.deepEqual(result.cli.context.constraints,['조건 하나','조건 둘']);
+    assert.deepEqual(result.cli.context.skills,['review','tests']);
+    assert.equal(result.cli.context.projectInstructions,true);
     assert.equal(result.cli.mainModel, 'codex-main');
     assert.equal(result.cli.participants[0].model, 'codex-child');
     assert(!Object.hasOwn(result.external, 'mainModel'));
     assert.equal(result.external.participants[0].model, 'codex-child');
-    if(process.env.MODEL_UI_SCREENSHOT_DIR){await win.webContents.executeJavaScript(`window.fixture.catalog(false);document.getElementById('open-form').click();document.getElementById('main-tool').value='claude';document.getElementById('main-tool').dispatchEvent(new Event('change'));document.getElementById('main-model').value='claude-main';document.getElementById('goal').value='코드 검토';document.activeElement?.blur();window.scrollTo(0,0);`);await new Promise(r=>setTimeout(r,100));fs.mkdirSync(process.env.MODEL_UI_SCREENSHOT_DIR,{recursive:true});fs.writeFileSync(path.join(process.env.MODEL_UI_SCREENSHOT_DIR,'model-dropdowns.png'),(await win.webContents.capturePage()).toPNG());}
-    console.log('PASS renderer model selection, per-tool drafts, refresh preservation and OpenClaw-main exclusion');
+    if(process.env.MODEL_UI_SCREENSHOT_DIR){await win.webContents.executeJavaScript(`window.fixture.catalog(false);document.getElementById('open-form').click();document.getElementById('main-tool').value='claude';document.getElementById('main-tool').dispatchEvent(new Event('change'));document.getElementById('main-model').value='claude-main';document.getElementById('goal').value='코드 검토';document.getElementById('context-background').closest('details').open=true;document.activeElement?.blur();window.scrollTo(0,0);`);await new Promise(r=>setTimeout(r,100));fs.mkdirSync(process.env.MODEL_UI_SCREENSHOT_DIR,{recursive:true});fs.writeFileSync(path.join(process.env.MODEL_UI_SCREENSHOT_DIR,'model-dropdowns.png'),(await win.webContents.capturePage()).toPNG());await win.webContents.executeJavaScript("document.getElementById('context-background').scrollIntoView({block:'start'});");await new Promise(r=>setTimeout(r,80));fs.writeFileSync(path.join(process.env.MODEL_UI_SCREENSHOT_DIR,'context-form.png'),(await win.webContents.capturePage()).toPNG());}
+    console.log('PASS context/skill form submission, renderer model selection, per-tool drafts, refresh preservation and OpenClaw-main exclusion');
   } finally { win.destroy(); }
 }).then(() => app.quit(), e => { console.error(e); app.exit(1); });

@@ -349,6 +349,12 @@ function renderDetail(detail) {
   if (root.readOnly) { text('coordinator-state','OpenClaw 대화별 관측 · 읽기 전용'); text('detail-time',`최근 요청 ${time(root.external?.lastInteractionAt || root.createdAt)}`); text('detail-elapsed',`최근 활동 ${age(root.updatedAt)} 전`); }
   // Provider text is inert: never evaluate Markdown, HTML or terminal escapes.
   text('detail-body',JSON.stringify(detail,null,2));
+  if ($('context-details')) {
+    $('context-details').hidden=!root.context;
+    const c=root.context || {}, receipts=root.contextSnapshots || [];
+    text('context-summary',[c.background,c.status,...(root.contextUpdates || []).map(u=>'추가 지시: '+u.message),...(c.constraints || []).map(s=>'조건: '+s),...(c.decisions || []).map(s=>'결정: '+s),...(c.completionCriteria || []).map(s=>'완료 기준: '+s),...receipts.map(r=>`${r.tool}/${r.profileId} · 스킬: ${r.skills.join(', ') || '없음'} · 지침: ${r.instructionFiles.join(', ') || '없음'} · ${r.hash.slice(0,12)}`)].filter(Boolean).join('\n'));
+  }
+
   $('final').hidden=!root.finalResponse; text('final-response',root.finalResponse || '');
   text('ack',root.status === 'completed' ? '결과 확인 완료됨' : '결과 확인 완료');
   text('ack-help',root.coordinator?.tool === 'openclaw' ? (root.status === 'completed' ? 'OpenClaw 대화로 결과 전달이 확인되었습니다.' : '대화로 실제 전달된 뒤 OpenClaw에서 완료 처리합니다.') : root.status === 'completed' ? '이 결과를 확인한 기록이 저장되었습니다.' : '읽은 뒤 확인하면 이 작업이 완료로 정리됩니다.');
@@ -489,7 +495,9 @@ $('submit-form').onsubmit=event => {
     if(!participants.length) throw Error(' 함께 일할 계정을 한 개 이상 선택해 주세요.');
     if(!$('project').value.trim() || !$('goal').value.trim()) throw Error('작업 내용과 프로젝트 폴더를 입력해 주세요.');
     const mainModel=mainTool === 'openclaw' ? '' : $('main-model').value.trim();
-    const root=await window.api.tasksSubmit({requestId,mainTool,...(mainModel ? {mainModel} : {}),bindingId:$('binding').value,projectPath:$('project').value.trim(),goal:$('goal').value.trim(),permission:$('permission').value,executionPolicy:$('execution-policy').value,participants});
+    const lines=id=>$(id).value.split('\n').map(s=>s.trim()).filter(Boolean);
+    const context={background:$('context-background').value.trim(),constraints:lines('context-constraints'),decisions:lines('context-decisions'),completionCriteria:lines('context-completion'),skills:$('context-skills').value.split(',').map(s=>s.trim()).filter(Boolean),projectInstructions:$('context-project').checked};
+    const root=await window.api.tasksSubmit({requestId,context,mainTool,...(mainModel ? {mainModel} : {}),bindingId:$('binding').value,projectPath:$('project').value.trim(),goal:$('goal').value.trim(),permission:$('permission').value,executionPolicy:$('execution-policy').value,participants});
     selectedId=root.id; selectionVersion++; detailCache=null; filter='all'; $('search').value=''; $('response').value=''; $('confirm-cancel').hidden=true;
     requestId=crypto.randomUUID(); setForm(false); notice('작업을 맡겼습니다. 아래에서 담당별 상태를 확인하세요.');
   });

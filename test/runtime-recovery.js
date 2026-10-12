@@ -105,6 +105,89 @@ try {
   assert.throws(() => e.prepare(followupAttempt), /model identifier/);
   console.log('PASS explicit source/version/active-writer validation and immutable inheritance before any spawn');
 
+
+  // Reproduce the Traveler directory handoff block, then narrow it to files.
+  const repairDir = path.join(sourceDir, 'apps', 'server'); fs.mkdirSync(repairDir, { recursive: true });
+  fs.writeFileSync(path.join(repairDir, 'one.js'), 'one'); fs.writeFileSync(path.join(repairDir, 'two.js'), 'two');
+  fs.writeFileSync(path.join(repairDir, '.env'), 'fixture-only');
+  fs.symlinkSync(path.join(repairDir, 'one.js'), path.join(repairDir, 'link.js'));
+  fs.linkSync(path.join(repairDir, 'two.js'), path.join(repairDir, 'hard.js'));
+  function repairFixture() {
+    const r = root({ executionPolicy: 'edit-only' });
+    const source = task(r, { state: 'succeeded', resultVersion: 1, cwd: sourceDir });
+    const inputs = [{ taskId: source.id, resultVersion: 1, paths: ['apps/server'] }];
+    const t = task(r, { inputs }); const a = attempt(r, t);
+    const override = { taskId: t.id, inputs: [{ ...inputs[0], paths: ['apps/server/one.js'] }] };
+    return { r, t, a, source, override };
+  }
+  const repaired = repairFixture();
+  const originalTask = e.db.get('task', repaired.t.id), originalAttempt = e.db.get('attempt', repaired.a.id);
+  const repairRequest = request(repaired.t, { inputOverrides: [repaired.override], executionPolicy: 'build-test' });
+  assert.throws(() => require('../src/runtime/artifacts').validateInputFiles({ sources: e.validateInputs(repaired.r, repaired.t.inputs), baselineCommit: commit }), /Non-regular/);
+  e.resume(repaired.r.id, repairRequest);
+  assert.equal(e.root(repaired.r.id).executionPolicy, 'build-test');
+  assert.deepEqual(e.db.get('task', repaired.t.id).inputs, repaired.override.inputs);
+  assert.deepEqual(e.db.get('attempt', repaired.a.id), originalAttempt);
+  assert.equal(e.tasks(repaired.r.id).length, 2);
+  const repairedEvents = e.db.events(repaired.r.id).filter(event => event.type === 'artifact_inputs_repaired');
+  assert.equal(repairedEvents.length, 1); assert.deepEqual(repairedEvents[0].body.previousInputs, originalTask.inputs);
+  e.resume(repaired.r.id, repairRequest); assert.equal(e.attempts(repaired.r.id).length, 2);
+  assert.throws(() => e.resume(repaired.r.id, { ...repairRequest, inputOverrides: [] }), /Conflicting/);
+  const retry = e.attempts(repaired.r.id).at(-1); retry.binding = { ...binding, model: '--invalid' };
+  assert.throws(() => e.prepare(retry), /model identifier/);
+  const repairedTask = e.db.get('task', repaired.t.id);
+  assert.equal(fs.readFileSync(path.join(repairedTask.cwd, 'apps/server/one.js'), 'utf8'), 'one');
+  assert(!fs.existsSync(path.join(repairedTask.cwd, 'apps/server/.env')));
+  assert.deepEqual(repairedTask.inputSnapshot.manifest.files.map(f => f.path), ['apps/server/one.js']);
+  assert(!e.db.events(repaired.r.id).some(event => event.type === 'spawn_intent'));
+  console.log('PASS directory repair preserves source versions/history, audits changes, stages only selected files and replays exactly once');
+
+  function rejectRepair(change, pattern) {
+    const f = repairFixture(); const before = e.db.get('task', f.t.id);
+    const req = request(f.t, { inputOverrides: [f.override], executionPolicy: 'build-test' });
+    change(f, req);
+    const persistedBefore = e.db.get('task', f.t.id);
+    assert.throws(() => e.resume(f.r.id, req), pattern);
+    assert.deepEqual(e.db.get('task', f.t.id), persistedBefore);
+    assert.equal(e.root(f.r.id).status, 'needs_user');
+    assert.equal(e.root(f.r.id).executionPolicy, 'edit-only');
+    assert(!e.root(f.r.id).inputRequest.consumedBy);
+    assert.equal(e.attempts(f.r.id).length, 1);
+    assert(!e.db.events(f.r.id).some(event => event.type === 'artifact_inputs_repaired'));
+  }
+  for (const [selected, pattern] of [
+    ['apps/server', /Non-regular/], ['apps/server/.env', /Protected/],
+    ['apps/server/link.js', /Non-regular/], ['apps/server/hard.js', /Non-regular/],
+    ['apps/server/missing.js', /Missing artifact/], ['apps/server/../code.cs', /Unsafe/],
+    ['code.cs', /expand the selected scope/], ['apps/server-other/file.js', /expand the selected scope/],
+  ]) rejectRepair((f, req) => { req.inputOverrides[0].inputs[0].paths = [selected]; }, pattern);
+  rejectRepair((f, req) => { req.inputOverrides[0].inputs[0].paths.push('apps/server/one.js'); }, /Duplicate/);
+  rejectRepair((f, req) => { req.inputOverrides[0].inputs[0].resultVersion = 2; }, /artifact_source/);
+  rejectRepair((f, req) => { req.inputOverrides[0].inputs = []; }, /preserve source/);
+  rejectRepair((f, req) => { req.inputOverrides[0].inputs = null; }, /invalid_artifact_inputs/);
+  rejectRepair((f, req) => { req.inputOverrides.push(req.inputOverrides[0]); }, /cannot replace/);
+  rejectRepair((f, req) => { req.inputOverrides[0].taskId = f.source.id; }, /cannot replace/);
+  rejectRepair((f, req) => { req.inputOverrides = {}; }, /Invalid artifact input overrides/);
+  rejectRepair((f, req) => { const other = task(f.r, { state: 'succeeded', resultVersion: 1, cwd: sourceDir }); req.inputOverrides[0].inputs[0].taskId = other.id; }, /preserve source/);
+  rejectRepair((f, req) => { const other = task(root(), { state: 'succeeded', resultVersion: 1, cwd: sourceDir }); req.inputOverrides[0].inputs[0].taskId = other.id; }, /artifact_source/);
+  rejectRepair((f, req) => { const t = e.db.get('task', f.t.id); t.inputSnapshot = { hash: 'already-captured' }; e.db.put('task', t); }, /cannot replace/);
+  rejectRepair((f, req) => { req.inputVersion = 2; }, /stale or already consumed/);
+  console.log('PASS directory, secrets, links, traversal, wider scope, wrong source/version and captured/stale request rejection without state changes');
+
+  const atomic = repairFixture(), sibling = task(atomic.r, { inputs: atomic.t.inputs }); attempt(atomic.r, sibling);
+  const atomicReq = request(atomic.t, { retryTaskIds: [atomic.t.id, sibling.id], executionPolicy: 'build-test', inputOverrides: [atomic.override, { taskId: sibling.id, inputs: atomic.t.inputs }] });
+  assert.throws(() => e.resume(atomic.r.id, atomicReq), /Non-regular/);
+  assert.deepEqual(e.db.get('task', atomic.t.id).inputs, atomic.t.inputs);
+  assert.equal(e.attempts(atomic.r.id).length, 2); assert.equal(e.root(atomic.r.id).executionPolicy, 'edit-only');
+  atomicReq.inputOverrides[1].inputs = atomic.override.inputs;
+  const eventWriter = e.db.event;
+  e.db.event = function (...args) { if (args[1] === 'artifact_inputs_repaired') throw Error('injected audit write failure'); return eventWriter.apply(this, args); };
+  assert.throws(() => e.resume(atomic.r.id, atomicReq), /injected audit/); e.db.event = eventWriter;
+  assert.deepEqual(e.db.get('task', atomic.t.id).inputs, atomic.t.inputs); assert(!e.root(atomic.r.id).inputRequest.consumedBy);
+  e.resume(atomic.r.id, atomicReq); assert.equal(e.attempts(atomic.r.id).length, 4);
+  assert.equal(e.db.events(atomic.r.id).filter(event => event.type === 'artifact_inputs_repaired').length, 2);
+  console.log('PASS all overrides validate together, audit failures roll back atomically and valid siblings resume together');
+
   const isolated = new Engine(path.join(tmp, 'isolated-runtime'));
   try {
     const ir = { ...root({ status: 'running' }), id: randomUUID() };

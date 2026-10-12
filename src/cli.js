@@ -210,7 +210,7 @@ function cmdPath() {
 function help() {
   console.log(`cli-accounts <command>
   도구: claude | codex
-  delegate <tool> --profile <id> -- <args...> 작업별 위임 (프로필 필수, 전역 전환 금지)
+  delegate <tool> --profile <id> [--context task.json] -- <args...> 작업별 위임 (프로필 필수, 전역 전환 금지)
   run <tool> [--profile <id>] -- <args...>  활성 계정 변경 없이 고정 실행
   dashboard [--port N] [--public-origin URL] 로컬 웹 작업 관리
   tasks                                   독립 작업 서비스와 관리형 위임

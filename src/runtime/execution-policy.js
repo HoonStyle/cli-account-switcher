@@ -13,8 +13,11 @@ function normalizeExecutionPolicy(permission, value = 'edit-only') {
   return value;
 }
 const buildRules = ['dotnet build', 'dotnet build *', 'dotnet test', 'dotnet test *', 'dotnet restore', 'dotnet restore *',
+  'npm ci --offline', 'npm ci --offline --ignore-scripts',
   'npm test', 'npm test *', 'npm run build', 'npm run build *', 'npm run test', 'npm run test *',
-  'node --test', 'node --test *', 'node --check *', 'node test/*', 'node scripts/test-*'];
+  'npm run typecheck', 'npm run typecheck *',
+  'node --version', 'node --test', 'node --test *', 'node --check *',
+  'node --import tsx --test *', 'node test/*', 'node scripts/test-*'];
 const versionCache = new Map();
 function verifyClaude(executable) {
   const st = fs.statSync(executable), key = `${executable}:${st.size}:${st.mtimeMs}`;
@@ -28,7 +31,7 @@ function verifyClaude(executable) {
   versionCache.set(key, true);
 }
 function existing(dir) { try { return fs.realpathSync(dir); } catch { return null; } }
-function buildSettings({ binding, cwd, dir }) {
+function buildSettings({ binding, cwd, dir, contextDir }) {
   verifyClaude(binding.executable);
   cwd = fs.realpathSync(cwd);
   const home = os.homedir();
@@ -59,22 +62,31 @@ function buildSettings({ binding, cwd, dir }) {
   for (const key of Object.keys(gitEnv)) if (key.startsWith('GIT_')) delete gitEnv[key];
   gitEnv.GIT_CONFIG_GLOBAL = '/dev/null'; gitEnv.GIT_CONFIG_NOSYSTEM = '1';
   try { commonGit = execFileSync('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-C', cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8', env: gitEnv }).trim(); } catch { throw Error('Cannot resolve isolated worktree Git boundary'); }
+  // Reuse existing tarballs for the offline-only install grant; npm configuration
+  // stays isolated and the shared cache is never writable by a child.
+  const sharedNpmContent = existing(path.join(home, '.npm', '_cacache'));
+  const npmCache = sharedNpmContent ? path.join(home, '.npm') : path.join(cache, 'npm');
   const secrets = ['.env', '.env.*', '**/.env', '**/.env.*', '**/*.pem', '**/*.key', '**/.npmrc', '**/NuGet.Config', '**/nuget.config'].map(p => path.join(cwd, p));
   const settings = {
     permissions: { allow: buildRules.map(rule => `Bash(${rule})`), deny: ['Read(./.env)', 'Read(./.env.*)', 'Read(./**/*.pem)', 'Read(./**/*.key)', 'Read(./**/.npmrc)'], defaultMode: 'acceptEdits' },
     sandbox: {
       enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: false, excludedCommands: [],
-      filesystem: { disabled: false, denyRead: ['/Users', '/home', '/Volumes', ...secrets], allowRead: [cwd, nodeRoot, ...(sdk ? [sdk] : [])],
-        denyWrite: [commonGit, path.join(cwd, '.git'), path.join(cwd, '.claude'), path.join(cwd, '.codex')], allowWrite: [] },
+      filesystem: { disabled: false, denyRead: ['/Users', '/home', '/Volumes', ...secrets], allowRead: [cwd, commonGit, nodeRoot, ...(sharedNpmContent ? [sharedNpmContent] : []), ...(sdk ? [sdk] : [])],
+        denyWrite: [...(sharedNpmContent ? [npmCache, sharedNpmContent] : []), commonGit, path.join(cwd, '.git'), path.join(cwd, '.claude'), path.join(cwd, '.codex')], allowWrite: [] },
       network: { allowedDomains: ['registry.npmjs.org', 'api.nuget.org', 'globalcdn.nuget.org'], allowLocalBinding: false, allowAllUnixSockets: false },
       credentials: { envVars: ['GITHUB_TOKEN', 'GH_TOKEN', 'NPM_TOKEN', 'NODE_AUTH_TOKEN', 'SSH_AUTH_SOCK'].map(name => ({ name, mode: 'deny' })) },
     },
   };
   const settingsFile = path.join(dir, 'execution-settings.json');
+  if (contextDir) {
+    const approvedContext = fs.realpathSync(contextDir);
+    settings.sandbox.filesystem.allowRead.push(approvedContext);
+    settings.sandbox.filesystem.denyWrite.push(approvedContext);
+  }
   fs.writeFileSync(settingsFile, JSON.stringify(settings), { mode: 0o600 });
   const env = { PATH: [nodeBin, sdk, '/usr/bin', '/bin', '/usr/sbin', '/sbin'].filter(Boolean).join(path.delimiter),
     DOTNET_CLI_HOME: path.join(cache, 'dotnet'), NUGET_PACKAGES: path.join(cache, 'nuget'), DOTNET_CLI_TELEMETRY_OPTOUT: '1', DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1',
-    npm_config_cache: path.join(cache, 'npm'), npm_config_userconfig: npmUser, npm_config_globalconfig: npmGlobal,
+    npm_config_engine_strict: 'true', npm_config_cache: npmCache, npm_config_logs_dir: path.join(cache, 'npm-logs'), npm_config_update_notifier: 'false', npm_config_audit: 'false', npm_config_userconfig: npmUser, npm_config_globalconfig: npmGlobal,
     GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', BASH_ENV: '/dev/null', ENV: '/dev/null' };
   if (sdk) env.DOTNET_ROOT = sdk;
   return { settingsFile, env };

@@ -2,6 +2,7 @@
 const path = require('path');
 const { normalizeModel } = require('../launch/model');
 const { normalizeExecutionPolicy } = require('./execution-policy');
+const { normalizeContext } = require('./context');
 function text(value, name, max = 10000) {
   if (typeof value !== 'string' || !value.trim() || value.length > max) throw new Error(`Invalid ${name}`);
   return value;
@@ -21,6 +22,7 @@ function submission(input, state) {
   const params = { requestId: text(input.requestId, 'request ID', 200), goal: text(input.goal, 'goal'), projectPath, mainTool, participants, permission: input.permission };
   params.executionPolicy = normalizeExecutionPolicy(input.permission, input.executionPolicy);
   params.mainModel = normalizeModel(input.mainModel);
+  if (input.context !== undefined) params.context = normalizeContext(input.context);
   if (mainTool === 'openclaw') {
     if (params.mainModel) throw new Error('OpenClaw main model is controlled by its conversation');
     params.mainKind = 'openclaw'; params.bindingId = text(input.bindingId, 'OpenClaw binding', 200);

@@ -12,7 +12,7 @@ const mainSchema = { type: 'object', additionalProperties: false, required: ['ki
   finalResponse: { type: 'string' },
 } };
 const childSchema = { type: 'object', additionalProperties: false, required: ['success', 'summary', 'artifacts'], properties: { success: { type: 'boolean' }, summary: { type: 'string' }, artifacts: { type: 'array', items: { type: 'string' } } } };
-function buildInvocation({ binding, role, sessionId, permission, executionPolicy, cwd, dir, capabilitySnapshot }) {
+function buildInvocation({ binding, role, sessionId, permission, executionPolicy, cwd, dir, capabilitySnapshot, contextDir }) {
   const policy = normalizeExecutionPolicy(permission, executionPolicy);
   const model = normalizeModel(binding.model);
   const schema = role === 'child' ? childSchema : mainSchema;
@@ -24,7 +24,7 @@ function buildInvocation({ binding, role, sessionId, permission, executionPolicy
   if (binding.tool === 'claude') {
     args = ['--safe-mode', '--strict-mcp-config', '--tools', role === 'child' ? (permission === 'workspace-write' ? 'Read,Glob,Grep,Edit,Write' : 'Read,Glob,Grep') : '', '--permission-mode', role === 'child' && permission === 'workspace-write' ? 'acceptEdits' : 'dontAsk', '-p', '--output-format', 'stream-json', '--verbose', '--json-schema', JSON.stringify(schema)];
     if (role === 'child' && policy === 'build-test') {
-      const prepared = buildSettings({ binding, cwd, dir });
+      const prepared = buildSettings({ binding, cwd, dir, contextDir });
       args[args.indexOf('--tools') + 1] += ',Bash';
       args.push('--restricted', '--setting-sources', '', '--settings', prepared.settingsFile, '--permission-prompts', 'none');
       executionEnv = prepared.env;
@@ -38,6 +38,7 @@ function buildInvocation({ binding, role, sessionId, permission, executionPolicy
       executionEnv = prepared.env; researchSnapshot = prepared.researchSnapshot;
     }
     if (model) args.push('--model', model);
+    if (contextDir && policy !== 'web-research') args.push('--add-dir', contextDir);
     if (sessionId) args.push('--resume', sessionId);
     else { expectedSession = randomUUID(); args.push('--session-id', expectedSession); }
   } else if (binding.tool === 'codex') {

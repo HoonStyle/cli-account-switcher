@@ -20,7 +20,7 @@ Local profiles · CLI launches · Usage records · Managed tasks
 
 CLI Account Switch is an Electron desktop app for managing multiple local Claude Code and Codex CLI profiles. It separates configuration homes and launches each official CLI with the selected profile. The official CLIs handle sign-in and model requests.
 
-> **Preview** — Current version: `0.2.0-preview.12`. Signed and notarized installers are not yet available. Windows build configuration is included, but managed task execution on Windows is not supported. [Release notes](docs/releases/v0.2.0-preview.12.md).
+> **Preview** — Current version: `0.2.0-preview.13`. Signed and notarized installers are not yet available. Windows build configuration is included, but managed task execution on Windows is not supported. [Release notes](docs/releases/v0.2.0-preview.13.md).
 
 ## Screenshots
 
@@ -150,6 +150,40 @@ Conversation history and running sessions are not part of this shared-file list.
 cli-accounts add codex isolated --no-share
 ```
 
+## Explicit skill and context handoff
+
+The task form accepts background, constraints, decisions, completion criteria, and selected skill directory names. CLI/API submissions use the same optional `context` object. New tasks snapshot project-root `AGENTS.md`/`CLAUDE.md` by default (`projectInstructions: false` opts out). Skills are resolved from project `.agents/skills`, project tool-specific skills, then the pinned profile's `skills` directory. A missing selected skill fails before execution.
+
+Selected `SKILL.md` instructions are supplied explicitly to both CLIs; supporting files are copied into a task-owned read-only snapshot. This is **explicit instruction/resource delivery**, not enabling all native slash commands, plugins, hooks or MCP servers. Existing tool permissions, Claude safe mode and Codex config/rule isolation remain in effect. A skill requiring an unavailable tool must report that limitation. File-link sharing alone is not evidence that a model used a skill.
+
+Snapshots are pinned across managed retries/resumes and record their SHA256, profile, skill names and instruction files. Versioned `respond`/`resume` may update the structured context; skill/instruction selection stays pinned. Attempts record the effective handoff hash and context revision. Accepted task follow-up messages are also forwarded to later children in chronological order, so a coordinator need not rephrase every user correction. Full conversation history and private memory files are not automatically collected. Snapshot limits are 12 skills, 200 files, 8 MiB total, 1 MiB per file and 128 KiB of inline instructions; nested resource symlinks and credential files are rejected.
+
+Direct profile-pinned execution can use the same handoff format without creating a managed coordinator:
+
+```sh
+cli-accounts delegate codex --profile work --context /absolute/task.json -- exec --json -
+cli-accounts delegate claude --profile work --context /absolute/task.json -- -p
+```
+
+`task.json` contains `projectPath`, `goal`, and `context`, for example:
+
+```json
+{
+  "projectPath": "/absolute/project",
+  "goal": "Review the change and return evidence",
+  "context": {
+    "background": "Continue the agreed review",
+    "constraints": ["Do not modify source files"],
+    "decisions": ["Keep the current public API"],
+    "completionCriteria": ["Report findings with file paths"],
+    "skills": ["code-review"],
+    "projectInstructions": true
+  }
+}
+```
+
+Direct mode preserves piped prompt text, pins the requested profile, and prints a local context receipt path to stderr. That receipt is not a managed task ID; retain the native CLI session/thread ID for continuation. Each direct invocation captures its supplied context anew. Managed tasks additionally retain the context and frozen skill snapshots in their durable task record.
+
 ## Task context and session resume
 
 Managed tasks persist their goal, project path, baseline commit, participating accounts, execution attempts, delegated results, reviews, and coordinator session ID in SQLite. The default database is `~/.cli-accounts-distribution/runtime/tasks.sqlite`. Per-attempt records in the runtime directory also retain prompts and results.
@@ -164,7 +198,11 @@ Task records can contain prompts, project paths, and output. Do not commit the r
 
 `executionPolicy` defaults to `edit-only`. Explicit `build-test` permission for a writable Claude task enables restricted build/test commands on macOS; it requires Claude Code 2.1.290+ with the supported sandbox flags and the relevant SDK. Installing an update does not upgrade existing task permissions.
 
+Build children inherit the native Node installation used to start the task service; launch the service with the project's required Node version. Run the granted commands directly (`npm ci --offline`, `npm run typecheck`, `npm test`, `npm run build`, or `node --import tsx --test ...`) without `env`, `cd`, shell wrappers or compound commands. npm checks package engine requirements and uses isolated configuration files. Existing npm content cache entries may be read for offline installs; the shared cache remains read-only and logs stay in the worktree. A cold cache can still cause an explicit offline cache-miss error. Linked worktrees may read their exact common Git directory, while Git writes, secret reads and unsandboxed execution remain denied.
+
 Tasks paused before execution can be resumed with bounded retry/round limits. Follow-up delegations can explicitly receive versioned files from earlier task worktrees; those changes are not automatically merged into the original project.
+
+Artifact inputs must list individual relative files, not directories or globs. If a task was blocked before any input snapshot was captured, `tasks resume ID request.json` also accepts `inputOverrides: [{taskId, inputs: [{taskId, resultVersion, paths}]}]`. The outer task ID identifies a blocked task selected in `retryTaskIds`; inner IDs and versions must match all of its original sources. Replacement paths may only narrow the original selection, for example from `apps/server` to `apps/server/src/app.ts`. The service checks the entire selection with the normal file, baseline, conflict and size rules before consuming the versioned request. It rejects captured inputs, new sources, wider paths and unsafe files. Repairs are audited, atomic and idempotent; the same request ID must be reused when an outcome is uncertain. Check `health.capabilities.artifactInputRecovery` before sending overrides to an installed service.
 
 ## Web dashboard
 
