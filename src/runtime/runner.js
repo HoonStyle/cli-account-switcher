@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+const processGroup = require('../launch/process-group');
 const { launchEnv, validateBinding } = require('../launch/profile-resolver');
 const { parseOutput } = require('../adapters/cli');
 const { executionEnv } = require('./execution-policy');
@@ -37,8 +38,8 @@ function save(name, value) {
       save('terminal.json', { ...resultBase, at: lastOutputAt, stdout: utf8Tail(stdout, STDOUT_LIMIT), stderr: utf8Tail(stderr, STDERR_LIMIT), truncated: stdoutBytes > STDOUT_LIMIT || stderrBytes > STDERR_LIMIT });
     };
     let lastOutputAt = null, lastProgressAt = null, stdout = '', stderr = '', eventBuffer = '', stdoutBytes = 0, stderrBytes = 0;
-    const stop = () => { if (child.pid) { try { process.platform === 'win32' ? child.kill('SIGTERM') : process.kill(-child.pid, 'SIGTERM'); } catch {} } };
-    const groupAlive = () => { if (process.platform === 'win32' || !child.pid) return false; try { process.kill(-child.pid, 0); return true; } catch (error) { if (error.code === 'ESRCH') return false; throw error; } };
+    const stop = () => { if (child.pid) { try { process.platform === 'win32' ? child.kill('SIGTERM') : processGroup.signalGroup(child.pid, 'SIGTERM'); } catch {} } };
+    const groupAlive = () => { if (process.platform === 'win32' || !child.pid) return false; return processGroup.groupAlive(child.pid); };
     const abortOutput = () => { abortAt ||= Date.now(); stop(); };
     timer = setInterval(() => {
       heartbeat();
@@ -49,7 +50,7 @@ function save(name, value) {
         orphanedDescendants = true; abortAt = Date.now(); stop();
       }
       if ((cancelled || abortAt) && Date.now() - (cancelAt || abortAt) > 5000) {
-        try { process.platform === 'win32' ? child.kill('SIGKILL') : process.kill(-child.pid, 'SIGKILL'); } catch {}
+        try { process.platform === 'win32' ? child.kill('SIGKILL') : processGroup.signalGroup(child.pid, 'SIGKILL'); } catch {}
       }
     }, 1000);
     heartbeat();
@@ -90,7 +91,7 @@ function save(name, value) {
     // Do not release an account/worktree while descendants in our process group remain.
     while (groupAlive()) {
       if (cancelled || abortAt) {
-        if (Date.now() - (cancelAt || abortAt) > 5000) { try { process.kill(-child.pid, 'SIGKILL'); } catch {} }
+        if (Date.now() - (cancelAt || abortAt) > 5000) { try { processGroup.signalGroup(child.pid, 'SIGKILL'); } catch {} }
         else stop();
       }
       await new Promise(r => setTimeout(r, 200));
@@ -116,12 +117,12 @@ function save(name, value) {
     // a silently running CLI or descendant can still modify its worktree.
     if (processStarted && child?.pid) {
       const target = process.platform === 'win32' ? child.pid : -child.pid;
-      const alive = () => { try { process.kill(target, 0); return true; } catch (error) { if (error.code === 'ESRCH') return false; throw error; } };
+      const alive = () => { if (target < 0) return processGroup.groupAlive(-target); try { process.kill(target, 0); return true; } catch (error) { if (error.code === 'ESRCH') return false; throw error; } };
       if (alive()) {
-        try { process.kill(target, 'SIGTERM'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+        try { target < 0 ? processGroup.signalGroup(-target, 'SIGTERM') : process.kill(target, 'SIGTERM'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
         const start = Date.now();
         while (alive() && Date.now() - start < 10000) {
-          if (Date.now() - start > 5000) { try { process.kill(target, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; } }
+          if (Date.now() - start > 5000) { try { target < 0 ? processGroup.signalGroup(-target, 'SIGKILL') : process.kill(target, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; } }
           await new Promise(resolve => setTimeout(resolve, 100));
         }
         if (alive()) throw Error('Runner fault: process termination remains unconfirmed');

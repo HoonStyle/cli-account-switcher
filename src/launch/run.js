@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+const processGroup = require('./process-group');
 const P = require('../paths');
 const { resolveProfile, launchEnv } = require('./profile-resolver');
 function main(args) {
@@ -26,8 +27,8 @@ function execute(binding, argv, { input, cwd } = {}) {
     const parentPid = process.ppid;
     const child = spawn(binding.executable, argv, { env: launchEnv(binding), cwd, stdio: input === undefined ? 'inherit' : ['pipe', 'inherit', 'inherit'], shell: false, detached: ownedGroup });
     let forwardedSignal, killTimer, parentWatch;
-    const groupAlive = () => { if (!ownedGroup || !child.pid) return false; try { process.kill(-child.pid, 0); return true; } catch (e) { if (e.code === 'ESRCH') return false; throw e; } };
-    const signalChild = signal => { if (!child.pid) return; try { ownedGroup ? process.kill(-child.pid, signal) : child.kill(signal); } catch (e) { if (e.code !== 'ESRCH') throw e; } };
+    const groupAlive = () => { if (!ownedGroup || !child.pid) return false; return processGroup.groupAlive(child.pid); };
+    const signalChild = signal => { if (!child.pid) return; try { ownedGroup ? processGroup.signalGroup(child.pid, signal) : child.kill(signal); } catch (e) { if (e.code !== 'ESRCH') throw e; } };
     const requestStop = signal => {
       forwardedSignal ||= signal;
       signalChild(signal);

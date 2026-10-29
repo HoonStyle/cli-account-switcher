@@ -58,7 +58,7 @@ function pid(run, suffix) { const value = Number(fs.readFileSync(run.marker + su
       const cancel = start(tool, 'running');
       await until(() => fs.existsSync(cancel.marker + '.descendant'));
       const cancelPid = pid(cancel, '.descendant'); cancel.proc.kill('SIGTERM');
-      await until(() => cancel.closed); assert.equal(cancel.signal, 'SIGTERM'); assert(!alive(cancelPid));
+      await until(() => cancel.closed); assert.equal(cancel.signal, 'SIGTERM', JSON.stringify({ code: cancel.code, signal: cancel.signal, stderr: cancel.stderr })); assert(!alive(cancelPid));
       console.log('PASS ' + tool + ': cancellation stops owned descendants before wrapper termination');
       const caller = start(tool, 'running', { caller: true });
       await until(() => fs.existsSync(caller.marker + '.descendant'));

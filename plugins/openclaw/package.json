@@ -1,6 +1,6 @@
 {
   "name": "cli-account-switcher-openclaw",
-  "version": "0.2.0-preview.14",
+  "version": "0.2.0-preview.15",
   "type": "module",
   "openclaw": {
     "extensions": [
