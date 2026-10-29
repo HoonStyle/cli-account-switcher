@@ -19,7 +19,7 @@ app.whenReady().then(async()=>{
     await run(`$('project').value='';$('choose-project').click();`);await pause(30);assert(await run(`return $('folder-dialog').open&&$('folder-list').children.length===2;`));
     await run(`$('folder-search').value='한글';$('folder-search').dispatchEvent(new Event('input'));`);assert.equal(await run(`return $('folder-list').children.length;`),1);
     await run(`$('folder-list').firstChild.click();`);await pause(30);assert.equal(await run(`return $('folder-path').textContent;`),'/host/한글 프로젝트 #1');
-    await run(`$('folder-select').click();`);await pause(20);assert(await run(`return !$('folder-dialog').open&&$('project').value==='/host/한글 프로젝트 #1'&&document.activeElement===$('choose-project');`));
+    await run(`await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('folder close event timed out')),2000);$('folder-dialog').addEventListener('close',()=>{clearTimeout(timer);resolve();},{once:true});$('folder-select').click();});`);assert(await run(`return !$('folder-dialog').open&&$('project').value==='/host/한글 프로젝트 #1'&&document.activeElement===$('choose-project');`));
     await run(`$('choose-project').click();`);await pause(20);await run(`$('folder-up').click();`);await pause(20);await run(`$('folder-cancel').click();`);assert.equal(await run(`return $('project').value;`),'/host/한글 프로젝트 #1');
     await run(`window.fixture.fail(true);$('choose-project').click();`);await pause(20);assert(await run(`return !$('folder-error').hidden&&$('folder-select').disabled;`));
     await run(`window.fixture.fail(false);$('folder-roots').firstChild.click();`);await pause(20);assert(await run(`return $('folder-error').hidden&&!$('folder-select').disabled;`));

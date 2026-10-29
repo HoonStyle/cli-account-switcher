@@ -33,6 +33,8 @@ contextBridge.exposeInMainWorld('api', {
   setApiFetch: (on) => ipcRenderer.invoke('setApiFetch', on),
   apiRefresh: () => ipcRenderer.invoke('apiRefresh'),
   apiRefreshOne: (tool, name) => ipcRenderer.invoke('apiRefreshOne', tool, name),
+  setResetAutoUse: (name, on) => ipcRenderer.invoke('setResetAutoUse', name, on),
+  openResetAutoUseLog: (name) => ipcRenderer.invoke('openResetAutoUseLog', name),
   setApiInterval: (min) => ipcRenderer.invoke('setApiInterval', min),
   setUsageMode: (mode) => ipcRenderer.invoke('setUsageMode', mode),
   setDensity: (d) => ipcRenderer.invoke('setDensity', d),

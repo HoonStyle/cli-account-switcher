@@ -20,19 +20,55 @@ function main(args) {
 
 function execute(binding, argv, { input, cwd } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(binding.executable, argv, { env: launchEnv(binding), cwd, stdio: input === undefined ? 'inherit' : ['pipe', 'inherit', 'inherit'], shell: false });
+    // Interactive/login terminals keep their foreground process group. Only
+    // bounded noninteractive work owns a group that can be stopped as a unit.
+    const ownedGroup = process.platform !== 'win32' && (binding.tool === 'codex' ? argv[0] === 'exec' : argv.includes('-p') || argv.includes('--print'));
+    const parentPid = process.ppid;
+    const child = spawn(binding.executable, argv, { env: launchEnv(binding), cwd, stdio: input === undefined ? 'inherit' : ['pipe', 'inherit', 'inherit'], shell: false, detached: ownedGroup });
+    let forwardedSignal, killTimer, parentWatch;
+    const groupAlive = () => { if (!ownedGroup || !child.pid) return false; try { process.kill(-child.pid, 0); return true; } catch (e) { if (e.code === 'ESRCH') return false; throw e; } };
+    const signalChild = signal => { if (!child.pid) return; try { ownedGroup ? process.kill(-child.pid, signal) : child.kill(signal); } catch (e) { if (e.code !== 'ESRCH') throw e; } };
+    const requestStop = signal => {
+      forwardedSignal ||= signal;
+      signalChild(signal);
+      if (ownedGroup && !killTimer) killTimer = setTimeout(() => signalChild('SIGKILL'), 5000);
+    };
     if (input !== undefined) { child.stdin.on('error', e => { if (e.code !== 'EPIPE') reject(e); }); child.stdin.end(input); }
-    const handlers = new Map(['SIGINT', 'SIGTERM'].map(signal => [signal, () => child.kill(signal)]));
+    const handlers = new Map(['SIGINT', 'SIGTERM'].map(signal => [signal, () => requestStop(signal)]));
     for (const [signal, handler] of handlers) process.on(signal, handler);
-    const cleanup = () => { for (const [signal, handler] of handlers) process.removeListener(signal, handler); };
+    // A foreground direct delegation has no durable service to own it after
+    // its launcher disappears. Managed tasks use their separate runner instead.
+    if (ownedGroup) { parentWatch = setInterval(() => { if (process.ppid !== parentPid && !forwardedSignal) requestStop('SIGTERM'); }, 250); parentWatch.unref(); }
+    const cleanup = () => { clearTimeout(killTimer); clearInterval(parentWatch); for (const [signal, handler] of handlers) process.removeListener(signal, handler); };
     child.once('error', e => { cleanup(); reject(e); });
-    child.once('exit', (code, signal) => {
-      cleanup();
-      if (signal) {
-        // Re-raise after removing forwarders so callers observe the original signal.
-        process.kill(process.pid, signal);
-      } else process.exitCode = code == null ? 1 : code;
-      resolve({ code, signal });
+    child.once('exit', async (code, signal) => {
+      let orphaned = false;
+      const sleep = ms => new Promise(done => setTimeout(done, ms));
+      try {
+        const drainUntil = Date.now() + 1000;
+        while (groupAlive() && !forwardedSignal && Date.now() < drainUntil) await sleep(50);
+        if (groupAlive()) {
+          orphaned = !forwardedSignal;
+          signalChild('SIGTERM');
+          const stopAt = Date.now();
+          while (groupAlive() && Date.now() - stopAt < 10000) {
+            if (Date.now() - stopAt >= 5000) signalChild('SIGKILL');
+            await sleep(50);
+          }
+          if (groupAlive()) throw Error('Delegated process termination remains unconfirmed');
+        }
+        cleanup();
+        if (orphaned) console.error('Delegated CLI exited with live descendants; remaining task processes were terminated.');
+        const finalSignal = forwardedSignal || signal;
+        if (finalSignal) {
+          // Re-raise only after owned descendants have stopped.
+          // Keep the event loop alive until the signal is delivered; otherwise
+          // Node can drain this async exit handler and report code 0 first.
+          setTimeout(() => process.exit(128 + require('os').constants.signals[finalSignal]), 1000);
+          process.kill(process.pid, finalSignal);
+        } else process.exitCode = code == null ? 1 : (code || (orphaned ? 1 : 0));
+        resolve({ code: process.exitCode ?? code, signal: finalSignal });
+      } catch (error) { cleanup(); reject(error); }
     });
   });
 }

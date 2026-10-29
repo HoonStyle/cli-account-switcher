@@ -20,7 +20,7 @@ Local profiles · CLI launches · Usage records · Managed tasks
 
 CLI Account Switch is an Electron desktop app for managing multiple local Claude Code and Codex CLI profiles. It separates configuration homes and launches each official CLI with the selected profile. The official CLIs handle sign-in and model requests.
 
-> **Preview** — Current version: `0.2.0-preview.13`. Signed and notarized installers are not yet available. Windows build configuration is included, but managed task execution on Windows is not supported. [Release notes](docs/releases/v0.2.0-preview.13.md).
+> **Preview** — Current version: `0.2.0-preview.14`. Signed and notarized installers are not yet available. Windows build configuration is included, but managed task execution on Windows is not supported. [Release notes](docs/releases/v0.2.0-preview.14.md).
 
 ## Screenshots
 

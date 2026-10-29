@@ -328,4 +328,4 @@ function usageHookStatus() {
   } catch { return false; }
 }
 
-module.exports = { installShims, pathStatus, registerPath, enableUsageHook, disableUsageHook, usageHookStatus, which };
+module.exports = { effectivePath, installShims, pathStatus, registerPath, enableUsageHook, disableUsageHook, usageHookStatus, which };

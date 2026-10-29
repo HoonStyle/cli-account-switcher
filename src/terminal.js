@@ -23,7 +23,15 @@ function openLoginTerminal(tool, home, isDefault) {
   if (P.IS_WIN) {
     // cmd metacharacters in filesystem paths cannot be forwarded safely through start.
     if (/["% !&|<>^\r\n]/.test(id) || /["%!&|<>^\r\n]/.test(runner)) throw new Error('Use CLI login for this Windows profile path');
-    spawn('cmd.exe', ['/c', 'start', 'cmd.exe', '/k', `node "${runner}" login ${tool} "${id}"`], { env, detached: true, stdio: 'ignore', windowsHide: false }).unref();
+    // These arguments are cmd syntax, not CRT argv. Node's default Windows quoting
+    // turns the nested quotes into literal backslash-quotes in the runner path.
+    // Keep the validated command verbatim, give START an explicit empty title,
+    // and disable cmd AutoRun in both shells. START supplies the interactive console.
+    const command = `start "" cmd.exe /d /k node "${runner}" login ${tool} "${id}"`;
+    spawn('cmd.exe', ['/d', '/s', '/c', `"${command}"`], {
+      env: { ...env, CLI_ACCOUNTS_ROOT: P.ROOT }, windowsVerbatimArguments: true,
+      detached: true, stdio: 'ignore', windowsHide: false,
+    }).unref();
   } else {
     const line = ['node', runner, 'login', tool, id].map(shellQuote).join(' ');
     // Terminal.app does not inherit this process's environment. Pin the root explicitly.

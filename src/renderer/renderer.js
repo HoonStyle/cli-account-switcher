@@ -78,9 +78,13 @@ function creditCell(tool, p) {
   const count = known ? `${r.availableCount.toLocaleString('ko-KR')}개` : r?.status === 'error' ? '조회 실패' : r?.status === 'unavailable' ? '미제공' : '미조회';
   const resetNote = r?.status === 'error' ? `${known ? '이전 값 · ' : ''}조회 실패${r.capturedAt ? ' · ' + age(r.capturedAt) : ''}` : known ? `${previous ? '이전 값 · ' : ''}${age(r.capturedAt) || '시각 미확인'}` : r?.status === 'unavailable' ? '계정에서 정보 미제공' : '계정 메뉴에서 지금 조회';
   const expiry = known && r.nearestExpiry && Number.isFinite(Date.parse(r.nearestExpiry)) ? `만료 예정 ${new Date(r.nearestExpiry).toLocaleString('ko-KR', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}` : '';
+  const automatic = p.resetAutoUse;
+  const last = automatic?.lastResult;
+  const used = last?.usedAt ? `최근 사용 ${new Date(last.usedAt).toLocaleString('ko-KR', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'})} · ${last.resetConfirmed === true ? '초기화 확인' : '초기화 미확인'}` : last?.apiOutcome === 'alreadyRedeemed' ? '이미 처리된 사용 확인 · 시각 미제공' : '';
+  const autoNote = automatic?.enabled ? `<span class="resource-note auto-reset" title="앱이 실행 중일 때 만료 10분 전부터 사용을 요청합니다. 최초 포함 최대 3회, 1분 간격이며 성공하면 중단합니다.">자동 사용 켜짐 · 만료 10분 전</span>${automatic.text && automatic.status !== 'waiting' ? `<span class="resource-note">${esc(automatic.text)}</span>` : ''}` : '';
   return `<div class="resources" id="resources-${esc(p.name)}">
     <div class="resource${!c || (c.balance == null && !c.unlimited) ? ' unknown' : ''}" title="제공된 크레딧 잔액 · 통화나 토큰으로 환산하지 않음"><span class="resource-label">일반 크레딧</span><b class="num">${esc(value)}</b><span class="resource-note">${esc(note)}</span></div>
-    <div class="resource reset-credits${previous ? ' stale' : ''}${!known ? ' unknown' : ''}"><span class="resource-label">리셋권</span><b class="num">${esc(count)}</b><span class="resource-note">${esc(resetNote)}</span>${expiry ? `<span class="resource-note expiry">${esc(expiry)}</span>` : ''}</div>
+    <div class="resource reset-credits${previous ? ' stale' : ''}${!known ? ' unknown' : ''}"><span class="resource-label">리셋권</span><b class="num">${esc(count)}</b><span class="resource-note">${esc(resetNote)}</span>${expiry ? `<span class="resource-note expiry">${esc(expiry)}</span>` : ''}${autoNote}${used ? `<span class="resource-note">${esc(used)}</span>` : ''}</div>
   </div>`;
 }
 function row(tool, p, active) {
@@ -113,6 +117,11 @@ function render() {
       el.querySelector('.more').onclick = (e) => openMenu(e.currentTarget, [
         { label: p.loggedIn ? '다시 로그인' : '로그인', act: () => run(() => api.login(tool, name), '터미널에서 로그인을 마치면 자동으로 갱신됩니다') },
         ...(state.directUsageApi ? [{ label: tool === 'codex' ? '사용량 · 크레딧 · 리셋권 조회' : '사용량 지금 조회 (API)', act: () => runMsg(() => api.apiRefreshOne(tool, name)) }] : []),
+        ...(tool === 'codex' ? [
+          { html: CHECK(p.resetAutoUse?.enabled) + '만료 10분 전 리셋권 자동 사용', checked: Boolean(p.resetAutoUse?.enabled), disabled: !p.loggedIn && !p.resetAutoUse?.enabled,
+            title: '앱이 켜져 있을 때만 동작합니다. 사용 시각과 초기화 확인 결과를 로그에 남깁니다.', act: () => runMsg(() => api.setResetAutoUse(name, !p.resetAutoUse?.enabled)) },
+          { label: '리셋권 자동 사용 로그 파일 보기', act: () => runMsg(() => api.openResetAutoUseLog(name)) },
+        ] : []),
         { label: '이름 변경', act: () => startRename(el, tool, name, p.label || p.name) },
         { label: '설정 폴더 열기', act: () => api.openHome(tool, name) },
         ...(p.isDefault ? [] : [{ hr: true }, { label: '제거…', danger: true, act: () => run(() => api.removeProfile(tool, name), '') }]),
@@ -174,6 +183,8 @@ function openMenu(anchor, items) {
   for (const it of items) {
     if (it.hr) { menuEl.appendChild(document.createElement('hr')); continue; }
     const btn = document.createElement('button'); btn.setAttribute('role', 'menuitem'); btn.className = it.danger ? 'danger' : '';
+    if (typeof it.checked === 'boolean') { btn.setAttribute('role', 'menuitemcheckbox'); btn.setAttribute('aria-checked', String(it.checked)); }
+    btn.disabled = Boolean(it.disabled); if (it.title) btn.title = it.title;
     btn.innerHTML = (it.html || esc(it.label)) + (it.k ? `<span class="k">${esc(it.k)}</span>` : '');
     btn.onclick = () => { closeMenu(); it.act(); };
     menuEl.appendChild(btn);

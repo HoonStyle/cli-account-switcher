@@ -18,6 +18,7 @@ let tasksWin = null;
 const usageApi = edition.directUsageApi ? require('./usage-api') : null;
 function requireUsageApi() { if (!usageApi) throw new Error('이 배포판은 로컬 사용량 기록만 지원합니다.'); }
 let apiErrors = {};
+const resetAutoUse = require('./reset-credit-auto-use').createAutoUse(store, { onChange: refresh });
 
 // Server-side usage lookup. Scheduling policy (freshness window, backoff, sequential calls)
 // lives in usage-api.refreshAll; this just wires modes: 'auto' (panel open or background timer, only when the
@@ -41,6 +42,7 @@ async function apiRefresh(mode, only, tools = P.TOOLS) {
 const loginWatchers = new Map();
 function watchLogin(tool, name) {
   const key = `${tool}/${name}`;
+  if (tool === 'codex') resetAutoUse.setEnabled(name, false).catch(() => {});
   if (loginWatchers.has(key)) clearInterval(loginWatchers.get(key));
   const home = store.profileHome(tool, name);
   const startedAt = Date.now();
@@ -75,7 +77,7 @@ function snapshot() {
         const home = store.profileHome(tool, name);
         let info;
         try { info = INSPECT[tool](home); } catch (e) { info = { error: e.message, home }; }
-        return { name, label: store.label(state, tool, name), isDefault: name === 'default', ...info, models: modelCatalog(tool, home) };
+        return { name, label: store.label(state, tool, name), isDefault: name === 'default', ...info, ...(tool === 'codex' ? { resetAutoUse: resetAutoUse.summary(name) } : {}), models: modelCatalog(tool, home) };
       }),
     };
   }
@@ -186,6 +188,8 @@ app.whenReady().then(() => {
       const stop = require('./claude-refresh').startUsageRefresh(apiRefresh);
       app.once('before-quit', stop);
     }
+    const stopReset = resetAutoUse.start(globalThis, require('electron').powerMonitor);
+    app.once('before-quit', stopReset);
     const stopLocal = require('./local-refresh').startLocalRefresh(refresh);
     app.once('before-quit', stopLocal);
   }
@@ -233,6 +237,19 @@ ipcMain.handle('apiRefreshOne', async (_e, tool, name) => {
   }
   if (v === 'ok') return '조회했습니다';
   throw new Error(String(v).startsWith('skip:') ? v.replace(/^skip: /, '건너뜀: ') : `API 조회 실패: ${v}`);
+});
+ipcMain.handle('setResetAutoUse', async (event, name, on) => {
+  if (!win || event.sender !== win.webContents || event.senderFrame !== win.webContents.mainFrame) throw Error('계정 패널에서만 설정할 수 있습니다');
+  await resetAutoUse.setEnabled(name, on);
+  refresh();
+  return on ? '만료 10분 전 자동 사용을 켰습니다 · 앱이 실행 중일 때 동작합니다' : '리셋권 자동 사용을 껐습니다';
+});
+ipcMain.handle('openResetAutoUseLog', async (_event, name) => {
+  const id = store.resolve('codex', name);
+  const file = path.join(store.profileHome('codex', id), require('./reset-credit-auto-use').LOG);
+  if (!require('fs').existsSync(file)) return '아직 자동 사용 기록이 없습니다';
+  shell.showItemInFolder(file);
+  return '자동 사용 로그 파일 위치를 열었습니다';
 });
 ipcMain.handle('setUsageMode', (_e, mode) => { store.setSetting('usageMode', mode === 'remaining' ? 'remaining' : 'used'); refresh(); return true; });
 ipcMain.handle('setDensity', (_e, d) => { store.setSetting('density', d === 'comfortable' ? 'comfortable' : 'compact'); refresh(); return true; });

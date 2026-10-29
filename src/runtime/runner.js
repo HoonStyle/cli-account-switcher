@@ -17,7 +17,7 @@ function save(name, value) {
   try { const directory = fs.openSync(dir, 'r'); try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); } } catch {}
 }
 (async () => {
-  let child, timer, exitReceipt, processStarted = false, phase = 'preflight', cancelled = false, cancelAt = 0, outputOverflow = false, outputDecodeError = false, abortAt = 0;
+  let child, timer, exitReceipt, exitAt = 0, orphanedDescendants = false, processStarted = false, phase = 'preflight', cancelled = false, cancelAt = 0, outputOverflow = false, outputDecodeError = false, abortAt = 0;
   const claim = path.join(dir, 'claimed');
   try { fs.closeSync(fs.openSync(claim, 'wx', 0o600)); } catch { process.exitCode = 2; return; }
   const spec = JSON.parse(fs.readFileSync(path.join(dir, 'spec.json'), 'utf8'));
@@ -38,10 +38,16 @@ function save(name, value) {
     };
     let lastOutputAt = null, lastProgressAt = null, stdout = '', stderr = '', eventBuffer = '', stdoutBytes = 0, stderrBytes = 0;
     const stop = () => { if (child.pid) { try { process.platform === 'win32' ? child.kill('SIGTERM') : process.kill(-child.pid, 'SIGTERM'); } catch {} } };
+    const groupAlive = () => { if (process.platform === 'win32' || !child.pid) return false; try { process.kill(-child.pid, 0); return true; } catch (error) { if (error.code === 'ESRCH') return false; throw error; } };
     const abortOutput = () => { abortAt ||= Date.now(); stop(); };
     timer = setInterval(() => {
       heartbeat();
       if (!cancelled && fs.existsSync(path.join(dir, 'cancel.request'))) { cancelled = true; cancelAt = Date.now(); stop(); }
+      // The CLI's exit is authoritative even while a descendant holds stdout
+      // open and prevents 'close'. A live, quiet CLI never enters this cleanup.
+      if (exitAt && Date.now() - exitAt >= 1000 && !cancelled && !abortAt && groupAlive()) {
+        orphanedDescendants = true; abortAt = Date.now(); stop();
+      }
       if ((cancelled || abortAt) && Date.now() - (cancelAt || abortAt) > 5000) {
         try { process.platform === 'win32' ? child.kill('SIGKILL') : process.kill(-child.pid, 'SIGKILL'); } catch {}
       }
@@ -75,13 +81,13 @@ function save(name, value) {
     child.stdout.on('end', () => decode()); // EOF flush must precede child close.
     child.stderr.setEncoding('utf8'); child.stderr.on('data', data => capture(true, data));
     child.stdin.on('error', () => {});
+    child.once('exit', (code, signal) => { exitReceipt = { code, signal }; exitAt = Date.now(); });
     const ended = new Promise((resolve, reject) => { child.once('error', reject); child.once('close', (code, signal) => resolve({ code, signal })); });
     child.stdin.end(spec.prompt);
     const exit = await ended;
     exitReceipt = exit;
     heartbeat(); // Preserve final activity even for executions shorter than 1s.
     // Do not release an account/worktree while descendants in our process group remain.
-    const groupAlive = () => { if (process.platform === 'win32' || !child.pid) return false; try { process.kill(-child.pid, 0); return true; } catch { return false; } };
     while (groupAlive()) {
       if (cancelled || abortAt) {
         if (Date.now() - (cancelAt || abortAt) > 5000) { try { process.kill(-child.pid, 'SIGKILL'); } catch {} }
@@ -92,7 +98,7 @@ function save(name, value) {
     fs.writeFileSync(path.join(dir, 'stdout.log'), stdout, { mode: 0o600 });
     fs.writeFileSync(path.join(dir, 'stderr.log'), stderr, { mode: 0o600 });
     if (cancelled) save('result.json', { ...resultBase, state: 'cancelled', exit });
-    else if (exit.code !== 0 || outputOverflow || outputDecodeError) save('result.json', { ...resultBase, state: 'failed', failurePhase: 'execution', processStarted, exit, reason: outputDecodeError ? 'invalid_stdout_utf8' : outputOverflow ? 'output_limit' : 'cli_exit' });
+    else if (exit.code !== 0 || outputOverflow || outputDecodeError || orphanedDescendants) save('result.json', { ...resultBase, state: 'failed', failurePhase: 'execution', processStarted, exit, reason: outputDecodeError ? 'invalid_stdout_utf8' : outputOverflow ? 'output_limit' : orphanedDescendants ? 'orphaned_descendants' : 'cli_exit' });
     else {
       phase = 'parse';
       const parsed = parseOutput(spec.binding.tool, stdout, spec.invocation);

@@ -1,5 +1,5 @@
 'use strict';
-// Read-only official RPC. Never persist raw response rows or opaque redemption IDs.
+// Official, profile-pinned RPC. Raw credit IDs stay in memory, never in display caches.
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
@@ -39,6 +39,7 @@ function invalidate(home) {
   generations.set(home, (generations.get(home) || 0) + 1);
   inflight.delete(home);
   write(home, empty());
+  try { fs.unlinkSync(path.join(home, 'reset-limits-cache.json')); } catch (e) { if (e.code !== 'ENOENT') throw e; }
 }
 function bindingFor(home) {
   const store = require('./store');
@@ -47,15 +48,30 @@ function bindingFor(home) {
   if (!profile) throw Error('Unknown profile');
   return require('./launch/profile-resolver').resolveProfile('codex', profile);
 }
-function readOfficial(home, opts = {}) {
+function accountKey(result) {
+  const account = result?.account;
+  if (account?.type !== 'chatgpt' || typeof account.email !== 'string' || !account.email.trim()) throw Error('ChatGPT 계정을 확인할 수 없습니다');
+  return require('crypto').createHash('sha256').update(JSON.stringify([account.email, result.workspaceRouting?.chatgptAccountId || null])).digest('hex');
+}
+function requestOfficial(home, method, params, opts = {}) {
   const binding = (opts.bindingFor || bindingFor)(home);
   const env = require('./launch/profile-resolver').launchEnv(binding);
+  env.PATH = require('./wrappers').effectivePath();
   return new Promise((resolve, reject) => {
     const child = (opts.spawn || spawn)(binding.executable, ['app-server'], { env, stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true });
-    let buffer = '', bytes = 0, done = false;
+    let buffer = '', bytes = 0, done = false, identity = null;
+    const finalId = opts.withAccount ? 3 : 2;
     const timer = setTimeout(() => finish(Error('RPC timeout')), opts.timeoutMs || 15000);
-    const finish = (err, value) => { if (done) return; done = true; clearTimeout(timer); child.stdin.end(); child.kill(); err ? reject(Error('리셋 크레딧 조회 실패')) : resolve(value); };
+    const finish = (err, value) => {
+      if (done) return; done = true; clearTimeout(timer);
+      child.stdin.end(); child.kill();
+      err ? reject(Error('Codex 리셋권 요청 실패')) : resolve(value);
+    };
     const send = obj => child.stdin.write(JSON.stringify(obj) + '\n');
+    const sendRequest = () => {
+      if (opts.beforeSend && opts.beforeSend() !== true) throw Error('Cancelled');
+      send({ id: finalId, method, params });
+    };
     child.on('error', () => finish(Error('RPC process error')));
     child.on('exit', () => { if (!done) finish(Error('RPC exited')); });
     child.stdin.on('error', () => finish(Error('RPC stdin error')));
@@ -67,18 +83,53 @@ function readOfficial(home, opts = {}) {
       while ((at = buffer.indexOf('\n')) >= 0 && !done) {
         const line = buffer.slice(0, at); buffer = buffer.slice(at + 1);
         let msg; try { msg = JSON.parse(line); } catch { continue; }
-        if (msg.id === 1) {
-          if (msg.error) return finish(Error('RPC initialize failed'));
-          send({ method: 'initialized' });
-          send({ id: 2, method: 'account/rateLimits/read', params: {} });
-        } else if (msg.id === 2) {
-          if (msg.error) return finish(Error('RPC read failed'));
-          finish(null, normalize(msg.result?.rateLimitResetCredits, null));
-        }
+        try {
+          if (msg.id === 1) {
+            if (msg.error) return finish(Error('RPC initialize failed'));
+            send({ method: 'initialized' });
+            if (opts.withAccount) send({ id: 2, method: 'account/read', params: { refreshToken: false } });
+            else sendRequest();
+          } else if (opts.withAccount && msg.id === 2) {
+            if (msg.error) return finish(Error('RPC account read failed'));
+            identity = accountKey(msg.result);
+            if (opts.expectedAccountKey && identity !== opts.expectedAccountKey) throw Error('Account changed');
+            sendRequest();
+          } else if (msg.id === finalId) {
+            if (msg.error) return finish(Error('RPC request failed'));
+            finish(null, { result: msg.result, accountKey: identity });
+          }
+        } catch { finish(Error('RPC request failed')); }
       }
     });
-    send({ id: 1, method: 'initialize', params: { clientInfo: { name: 'switch-reset-credit-reader', version: '1.0.0' }, capabilities: { experimentalApi: true } } });
+    send({ id: 1, method: 'initialize', params: { clientInfo: { name: 'switch-reset-credits', version: '1.0.0' }, capabilities: { experimentalApi: true } } });
   });
+}
+async function readOfficial(home, opts = {}) {
+  const { result } = await requestOfficial(home, 'account/rateLimits/read', {}, opts);
+  return normalize(result?.rateLimitResetCredits, null);
+}
+async function readDetails(home, opts = {}) {
+  const { result, accountKey: key } = await requestOfficial(home, 'account/rateLimits/read', {}, { ...opts, withAccount: true });
+  return { accountKey: key, credits: result?.rateLimitResetCredits, rateLimits: result?.rateLimits };
+}
+async function consume(home, params, opts = {}) {
+  if (!params?.creditId || typeof params.creditId !== 'string' || !params.idempotencyKey || typeof params.idempotencyKey !== 'string' || !opts.expectedAccountKey) throw Error('리셋권 사용 대상이 올바르지 않습니다');
+  const { result } = await requestOfficial(home, 'account/rateLimitResetCredit/consume', { creditId: params.creditId, idempotencyKey: params.idempotencyKey }, { ...opts, withAccount: true });
+  if (!['reset', 'alreadyRedeemed', 'nothingToReset', 'noCredit'].includes(result?.outcome)) throw Error('리셋권 사용 결과를 확인할 수 없습니다');
+  return result.outcome;
+}
+function recordDetails(home, details, now = Date.now()) {
+  // A post-redemption read supersedes any older in-flight display refresh.
+  generations.set(home, (generations.get(home) || 0) + 1);
+  inflight.delete(home);
+  write(home, normalize(details.credits, new Date(now).toISOString()));
+  if (details.rateLimits) {
+    const limits = details.rateLimits;
+    const win = w => w ? { usedPercent: w.usedPercent, resetsAt: w.resetsAt, windowMinutes: w.windowDurationMins } : null;
+    const value = { capturedAt: new Date(now).toISOString(), primary: win(limits.primary), secondary: win(limits.secondary), planType: limits.planType || null, source: SOURCE };
+    const file = path.join(home, 'reset-limits-cache.json'), tmp = file + '.' + process.pid + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(value), { mode: 0o600 }); fs.renameSync(tmp, file);
+  }
 }
 async function refresh(home, opts = {}) {
   if (inflight.has(home)) return inflight.get(home);
@@ -98,4 +149,4 @@ async function refresh(home, opts = {}) {
   inflight.set(home, run);
   try { return await run; } finally { if (inflight.get(home) === run) inflight.delete(home); }
 }
-module.exports = { readCached, refresh, normalize, readOfficial, invalidate, CACHE };
+module.exports = { readCached, refresh, normalize, readOfficial, readDetails, consume, recordDetails, invalidate, CACHE };

@@ -116,6 +116,7 @@ function removeProfile(tool, nameOrLabel, { deleteFiles = false } = {}) {
   if (name === 'default') throw new Error('기본 계정은 삭제할 수 없습니다');
   state[tool].profiles = state[tool].profiles.filter((p) => p !== name);
   if (state[tool].labels) delete state[tool].labels[name];
+  if (tool === 'codex' && state.codex.resetCreditAutoUse) delete state.codex.resetCreditAutoUse[name];
   if (state.apiMeta) delete state.apiMeta[`${tool}/${name}`];
   if (state[tool].active === name) state[tool].active = 'default';
   save(state);

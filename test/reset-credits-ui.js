@@ -15,10 +15,10 @@ const cases=[{availableCount:2,status:'available',capturedAt:now,nearestExpiry:'
  {availableCount:null,status:'unavailable'}];
 const state={density:'compact',usageMode:'remaining',directUsageApi:true,pathStatus:{first:true},apiMeta:{},tools:{
  claude:{active:'claude',profiles:[{name:'claude',label:'Claude',loggedIn:true,plan:'Max'}]},
- codex:{active:'account0',profiles:cases.map((r,i)=>({name:'account'+i,label:['개인','업무','보조','이전 값','미제공'][i],loggedIn:true,plan:'Pro',usage:{capturedAt:now,primary:{usedPercent:25,windowMinutes:300},secondary:{usedPercent:60,windowMinutes:10080}},credits:{balance:'62500',capturedAt:now},resetCredits:r}))}}};
-let notify, selected=0;
-contextBridge.exposeInMainWorld('api',{state:async()=>state,onState:fn=>notify=fn,resize:()=>{},setActive:async()=>{selected++;return state;},apiRefreshOne:async()=>'조회했습니다'});
-contextBridge.exposeInMainWorld('fixture',{density:d=>{state.density=d;notify(state);},selected:()=>selected});
+ codex:{active:'account0',profiles:cases.map((r,i)=>({name:'account'+i,label:['개인','업무','보조','이전 값','미제공'][i],loggedIn:true,plan:'Pro',usage:{capturedAt:now,primary:{usedPercent:25,windowMinutes:300},secondary:{usedPercent:60,windowMinutes:10080}},credits:{balance:'62500',capturedAt:now},resetCredits:r,resetAutoUse:{enabled:i===0,status:i===0?'waiting':'off',text:i===0?'만료 10분 전 자동 사용 대기':'',lastResult:i===0?{usedAt:now,resetConfirmed:true}:null}}))}}};
+let notify, selected=0, toggled=[],logs=[];
+contextBridge.exposeInMainWorld('api',{state:async()=>state,onState:fn=>notify=fn,resize:()=>{},setActive:async()=>{selected++;return state;},apiRefreshOne:async()=>'조회했습니다',setResetAutoUse:async(name,on)=>{toggled.push([name,on]);state.tools.codex.profiles.find(p=>p.name===name).resetAutoUse.enabled=on;return '설정 저장';},openResetAutoUseLog:async name=>{logs.push(name);return '로그 파일';}});
+contextBridge.exposeInMainWorld('fixture',{density:d=>{state.density=d;notify(state);},selected:()=>selected,toggled:()=>toggled,logs:()=>logs});
 `);
 app.whenReady().then(async()=>{
  const win=new BrowserWindow({show:false,width:440,height:900,webPreferences:{preload,contextIsolation:true,nodeIntegration:false}});
@@ -49,7 +49,22 @@ app.whenReady().then(async()=>{
    return {labels,selected:fixture.selected()};
   })()`);
   assert(interaction.labels.includes('사용량 · 크레딧 · 리셋권 조회'));
+  assert(interaction.labels.includes('만료 10분 전 리셋권 자동 사용'));
+  assert(interaction.labels.includes('리셋권 자동 사용 로그 파일 보기'));
   assert.equal(interaction.selected,0,'opening resource refresh must not switch account');
+  const toggles=await win.webContents.executeJavaScript(`(async()=>{
+   const checkbox=document.querySelector('.menu [role=menuitemcheckbox]');
+   const before=checkbox.getAttribute('aria-checked');checkbox.click();
+   await new Promise(r=>setTimeout(r,40));
+   document.querySelectorAll('#codex .row')[1].querySelector('.more').click();
+   const after=document.querySelector('.menu [role=menuitemcheckbox]').getAttribute('aria-checked');
+   [...document.querySelectorAll('.menu button')].find(b=>b.textContent.includes('로그 파일')).click();
+   await new Promise(r=>setTimeout(r,40));
+   return {before,after,toggled:fixture.toggled(),logs:fixture.logs(),selected:fixture.selected(),text:document.querySelector('#codex .row').textContent};
+  })()`);
+  assert.equal(toggles.before,'false');assert.equal(toggles.after,'true');
+  assert.deepEqual(toggles.toggled,[['account1',true]]);assert.deepEqual(toggles.logs,['account1']);assert.equal(toggles.selected,0);
+  assert.match(toggles.text,/최근 사용.*초기화 확인/);
   await win.webContents.executeJavaScript(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}))`);
   if(process.env.UI_SCREENSHOT) fs.writeFileSync(process.env.UI_SCREENSHOT,(await win.capturePage()).toPNG());
   console.log('PASS: reset-credit UI known/zero/unknown/error/unsupported, accessible descriptions, 2 widths × 2 densities, refresh action isolation');

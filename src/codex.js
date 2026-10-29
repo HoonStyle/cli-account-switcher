@@ -57,8 +57,8 @@ function cachedUsage(home) {
 function usage(home) {
   const local = rolloutUsage(home);
   const cached = cachedUsage(home);
-  if (local && cached) return new Date(cached.capturedAt) > new Date(local.capturedAt) ? cached : local;
-  return cached || local;
+  const reset = readJson(path.join(home, 'reset-limits-cache.json'));
+  return [local, cached, reset].filter(Boolean).sort((a, b) => (Date.parse(b.capturedAt) || 0) - (Date.parse(a.capturedAt) || 0))[0] || null;
 }
 
 function rolloutUsage(home) {
