@@ -76,7 +76,7 @@ function creditCell(tool, p) {
   const known = Number.isSafeInteger(r?.availableCount) && r.availableCount >= 0;
   const previous = known && (r.stale || r.status === 'error');
   const count = known ? `${r.availableCount.toLocaleString('ko-KR')}개` : r?.status === 'error' ? '조회 실패' : r?.status === 'unavailable' ? '미제공' : '미조회';
-  const resetNote = r?.status === 'error' ? `${known ? '이전 값 · ' : ''}조회 실패${r.capturedAt ? ' · ' + age(r.capturedAt) : ''}` : known ? `${previous ? '이전 값 · ' : ''}${age(r.capturedAt) || '시각 미확인'}` : r?.status === 'unavailable' ? '계정에서 정보 미제공' : '계정 메뉴에서 지금 조회';
+  const resetNote = r?.status === 'error' ? `${known ? '이전 값 · ' : ''}조회 실패${r.capturedAt ? ' · ' + age(r.capturedAt) : ''}` : known ? `${previous ? '이전 값 · ' : ''}${age(r.capturedAt) || '시각 미확인'}` : r?.status === 'unavailable' ? '계정에서 정보 미제공' : '조회를 눌러 확인';
   const expiry = known && r.nearestExpiry && Number.isFinite(Date.parse(r.nearestExpiry)) ? `만료 예정 ${new Date(r.nearestExpiry).toLocaleString('ko-KR', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}` : '';
   const automatic = p.resetAutoUse;
   const last = automatic?.lastResult;
@@ -84,17 +84,18 @@ function creditCell(tool, p) {
   const autoNote = automatic?.enabled ? `<span class="resource-note auto-reset" title="앱이 실행 중일 때 만료 10분 전부터 사용을 요청합니다. 최초 포함 최대 3회, 1분 간격이며 성공하면 중단합니다.">자동 사용 켜짐 · 만료 10분 전</span>${automatic.text && automatic.status !== 'waiting' ? `<span class="resource-note">${esc(automatic.text)}</span>` : ''}` : '';
   return `<div class="resources" id="resources-${esc(p.name)}">
     <div class="resource${!c || (c.balance == null && !c.unlimited) ? ' unknown' : ''}" title="제공된 크레딧 잔액 · 통화나 토큰으로 환산하지 않음"><span class="resource-label">일반 크레딧</span><b class="num">${esc(value)}</b><span class="resource-note">${esc(note)}</span></div>
-    <div class="resource reset-credits${previous ? ' stale' : ''}${!known ? ' unknown' : ''}"><span class="resource-label">리셋권</span><b class="num">${esc(count)}</b><span class="resource-note">${esc(resetNote)}</span>${expiry ? `<span class="resource-note expiry">${esc(expiry)}</span>` : ''}${autoNote}${used ? `<span class="resource-note">${esc(used)}</span>` : ''}</div>
+    <div class="resource reset-credits${previous ? ' stale' : ''}${!known ? ' unknown' : ''}"><span class="resource-label">리셋권</span><b class="num">${esc(count)}</b><span class="resource-note">${esc(resetNote)}</span>${expiry ? `<span class="resource-note expiry">${esc(expiry)}</span>` : ''}${autoNote}${used ? `<span class="resource-note">${esc(used)}</span>` : ''}<span class="reset-actions"><button class="btn small reset-check" title="공식 codex app-server로 리셋권 개수와 만료 시각을 조회합니다">조회</button><button class="btn small reset-use"${known && r.availableCount === 0 ? ' disabled' : ''} title="가장 먼저 만료되는 리셋권 1개를 지금 사용해 한도를 초기화합니다">지금 사용</button></span></div>
   </div>`;
 }
 function row(tool, p, active) {
   const on = p.name === active;
-  const idLine = p.loggedIn ? esc(p.email || '이메일 미확인') : '로그인 필요';
+  const keyed = Boolean(p.apiKey?.apiKey);
+  const idLine = keyed ? `API 키${p.apiKey.masked ? ' ' + esc(p.apiKey.masked) : ''}` : p.loggedIn ? esc(p.email || '이메일 미확인') : '로그인 필요';
   const shown = p.label || p.name;
   return `<div class="row" role="radio" tabindex="0" aria-checked="${on}" data-name="${esc(p.name)}" aria-label="${esc(shown)} ${on ? '사용 중' : '전환'}"${tool === 'codex' && p.loggedIn ? ` aria-describedby="resources-${esc(p.name)}"` : ''}>
     <span class="check">${ICON.check}</span>
     <div class="id"><div class="name"><span class="label" title="${esc([p.isDefault ? '기본 홈 (원래 설정 폴더)' : '', p.name !== shown ? '폴더: ' + p.name : ''].filter(Boolean).join(' · '))}">${esc(shown)}</span>${p.isDefault ? '<span class="tag">기본</span>' : ''}${p.plan ? `<span class="plan" title="${esc(p.planDetail || (p.planUntil ? '갱신/만료 ' + new Date(p.planUntil).toLocaleDateString('ko-KR') : ''))}">${esc(p.plan)}</span>` : ''}</div><div class="email ${p.loggedIn ? '' : 'warn'}" title="${esc(p.email || '')}">${idLine}</div></div>
-    ${p.loggedIn ? usageCell(tool, p) : `<button class="btn small login">로그인</button>`}
+    ${p.loggedIn || keyed ? usageCell(tool, p) : `<span class="login-actions"><button class="btn small login">로그인</button><button class="btn small keyset" title="구독 로그인 대신 API 키로 인증">API 키</button></span>`}
     <button class="iconbtn more" aria-label="${esc(p.name)} 더 보기" aria-haspopup="menu" aria-expanded="false">${ICON.more}</button>
     ${creditCell(tool, p)}
   </div>`;
@@ -103,6 +104,7 @@ function row(tool, p, active) {
 function render() {
   if (!state) return;
   document.body.classList.toggle('compact', state.density !== 'comfortable');
+  renderAntigravity();
   for (const tool of TOOLS) {
     const t = state.tools[tool];
     const list = $(`#${tool} .list`);
@@ -111,8 +113,11 @@ function render() {
       const name = el.dataset.name;
       const p = t.profiles.find((x) => x.name === name);
       const sw = () => { if (el.getAttribute('aria-checked') !== 'true') run(() => api.setActive(tool, name), `${tool} → ${name}`); };
-      el.onclick = (e) => { if (!e.target.closest('button')) sw(); };
+      el.onclick = (e) => { if (!e.target.closest('button, input, form')) sw(); };
       el.onkeydown = (e) => { if (e.target === el && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); sw(); } };
+      const resetCheck = el.querySelector('.reset-check'); if (resetCheck) resetCheck.onclick = () => checkReset(resetCheck, name);
+      const resetUse = el.querySelector('.reset-use'); if (resetUse) resetUse.onclick = () => useReset(resetUse, p);
+      const keyset = el.querySelector('.keyset'); if (keyset) keyset.onclick = () => startKeyEntry(el, tool, name);
       const login = el.querySelector('.login'); if (login) login.onclick = () => run(() => api.login(tool, name), '터미널에서 로그인을 마치면 자동으로 채워집니다');
       el.querySelector('.more').onclick = (e) => openMenu(e.currentTarget, [
         { label: p.loggedIn ? '다시 로그인' : '로그인', act: () => run(() => api.login(tool, name), '터미널에서 로그인을 마치면 자동으로 갱신됩니다') },
@@ -120,8 +125,12 @@ function render() {
         ...(tool === 'codex' ? [
           { html: CHECK(p.resetAutoUse?.enabled) + '만료 10분 전 리셋권 자동 사용', checked: Boolean(p.resetAutoUse?.enabled), disabled: !p.loggedIn && !p.resetAutoUse?.enabled,
             title: '앱이 켜져 있을 때만 동작합니다. 사용 시각과 초기화 확인 결과를 로그에 남깁니다.', act: () => runMsg(() => api.setResetAutoUse(name, !p.resetAutoUse?.enabled)) },
+          { label: '리셋권 조회', disabled: !p.loggedIn, act: () => checkReset(null, name) },
+          { label: '리셋권 지금 사용…', disabled: !p.loggedIn || p.resetCredits?.availableCount === 0, act: () => useReset(null, p) },
           { label: '리셋권 자동 사용 로그 파일 보기', act: () => runMsg(() => api.openResetAutoUseLog(name)) },
         ] : []),
+        { label: p.apiKey?.apiKey ? 'API 키 변경…' : 'API 키 등록…', title: '구독 로그인 대신 API 키로 인증합니다 (API 사용량 과금)', act: () => startKeyEntry(el, tool, name) },
+        ...(p.apiKey?.apiKey ? [{ label: 'API 키 제거', act: () => runMsg(() => api.removeApiKey(tool, name)) }] : []),
         { label: '이름 변경', act: () => startRename(el, tool, name, p.label || p.name) },
         { label: '설정 폴더 열기', act: () => api.openHome(tool, name) },
         ...(p.isDefault ? [] : [{ hr: true }, { label: '제거…', danger: true, act: () => run(() => api.removeProfile(tool, name), '') }]),
@@ -143,6 +152,47 @@ function render() {
   $('#hookText').textContent = modeNote + (srcs.length ? `출처: 세션 기록 · ${srcs.join(' · ')}` : '출처: 세션 기록만');
   fit();
 }
+
+function renderAntigravity() {
+  const agy = state.antigravity || { accounts: [] };
+  $('#agy-current').textContent = agy.error || (agy.checkedAt ? `확인한 로그인: ${agy.current?.email || '없음'} · ${new Date(agy.checkedAt).toLocaleTimeString('ko-KR')}` : '현재 로그인 미확인');
+  $('#agy-recover').hidden = !agy.recoveryRequired;
+  renderAntigravityUsage(agy);
+  const list = $('#antigravity .list');
+  list.innerHTML = agy.accounts.map(account => `<div class="row" data-id="${esc(account.id)}"><span class="check"></span><div class="id"><div class="name">${esc(account.label)}</div><div class="email">${esc(account.email)}</div></div><button class="iconbtn more" aria-label="${esc(account.label)} 메뉴">${ICON.more}</button><button class="btn small login agy-switch" ${agy.recoveryRequired ? 'disabled' : ''}>이 계정으로 전환</button></div>`).join('');
+  for (const row of list.querySelectorAll('.row')) {
+    row.querySelector('.agy-switch').onclick = () => run(() => api.antigravity('activate', row.dataset.id), '');
+    row.querySelector('.more').onclick = event => openMenu(event.currentTarget, [
+      { label: '저장 목록에서 제거 (로그인 유지)', act: () => run(() => api.antigravity('remove', row.dataset.id), '저장 목록에서 제거했습니다') },
+    ]);
+  }
+}
+function renderAntigravityUsage(agy) {
+  const quota = agy.usage;
+  const remaining = state.usageMode === 'remaining';
+  const compact = state.density !== 'comfortable';
+  $('#agy-usage-refresh').disabled = Boolean(agy.usagePending || agy.recoveryRequired);
+  $('#agy-usage-refresh').textContent = agy.usagePending ? '조회 중…' : '사용량 조회';
+  $('#agy-usage').setAttribute('aria-busy', String(Boolean(agy.usagePending)));
+  // The official report has no account identity: never attribute it to a
+  // saved account row or refresh a different account by switching logins.
+  $('#agy-usage').innerHTML = (quota?.groups || []).map(group => `<div class="agy-quota-group"><span class="agy-quota-name">${esc(group.name)}</span><div class="agy-quota-windows">${group.buckets.map(bucket => {
+    const value = Math.round(remaining ? bucket.remainingPercent : bucket.usedPercent);
+    const title = `${bucket.label} ${value}% ${remaining ? '남음' : '사용'}${bucket.resetsAt ? ' · 리셋 ' + new Date(bucket.resetsAt * 1000).toLocaleString('ko-KR') : ''}`;
+    return `<div class="usage-window ${cls(bucket.usedPercent)}" title="${esc(title)}"><span class="window-label">${esc(bucket.label)}</span><span class="window-value num">${value}%</span><span class="reset-time num">${compact ? relShort(bucket.resetsAt) : rel(bucket.resetsAt)}</span><span class="usage-track" aria-hidden="true"><span class="usage-fill" style="width:${value}%"></span></span></div>`;
+  }).join('')}</div></div>`).join('');
+  const status = $('#agy-usage-status');
+  status.classList.toggle('usage-error', Boolean(agy.usageError));
+  status.textContent = agy.usagePending ? '공식 agy에서 조회 중…' : agy.usageError ? `${quota ? '이전 값 · ' : ''}${agy.usageError}` : quota ? `${remaining ? '남은 비율' : '사용한 비율'} · 공식 agy · ${age(quota.capturedAt)}` : '사용량 미조회';
+}
+$('#agy-usage-refresh').onclick = () => run(() => api.antigravity('refreshUsage'), '사용량 조회 완료');
+$('#agy-check').onclick = () => run(() => api.antigravity('check'), '로그인 확인 완료');
+$('#agy-recover').onclick = () => run(() => api.antigravity('recover'), '이전 인증 복원 완료');
+$('#agy-save').onsubmit = event => {
+  event.preventDefault();
+  const input = $('#agy-save input');
+  if (input.value.trim()) run(async () => { await api.antigravity('save', input.value.trim()); input.value = ''; }, '현재 로그인을 저장했습니다');
+};
 
 // Report natural content height so the window shrinks/grows to fit.
 function fit() {
@@ -169,6 +219,42 @@ function startRename(rowEl, tool, name, current) {
   input.onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') finish(true); else if (e.key === 'Escape') finish(false); };
   input.onblur = () => finish(false);
   input.onclick = (e) => e.stopPropagation();
+}
+
+// Reset credits: official app-server RPC in the main process; use always asks first.
+async function checkReset(btn, name) {
+  if (btn) { btn.disabled = true; btn.textContent = '조회 중…'; }
+  await runMsg(() => api.checkResetCredits(name));
+}
+async function useReset(btn, p) {
+  const r = p.resetCredits || {};
+  const when = r.nearestExpiry && Number.isFinite(Date.parse(r.nearestExpiry)) ? new Date(r.nearestExpiry).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '확인 안 됨';
+  const count = Number.isSafeInteger(r.availableCount) ? `${r.availableCount}개` : '미조회';
+  if (!confirm(`${p.label || p.name} 계정의 Codex 리셋권 1개를 지금 사용할까요?\n\n보유 ${count} · 가장 빠른 만료 ${when}\n가장 먼저 만료되는 리셋권을 사용해 현재 사용 한도를 초기화합니다. 되돌릴 수 없습니다.`)) return;
+  if (btn) { btn.disabled = true; btn.textContent = '사용 중…'; }
+  say('리셋권 사용 요청 중…');
+  await runMsg(() => api.useResetCredit(p.name));
+}
+
+// Inline API key entry. The key goes straight to the main process and is never kept in state.
+function startKeyEntry(rowEl, tool, name) {
+  rowEl.querySelector('.keyentry')?.remove();
+  const form = document.createElement('form');
+  form.className = 'keyentry';
+  const hint = tool === 'claude' ? 'sk-ant-… (이 프로필 실행 시 ANTHROPIC_API_KEY로 사용)' : 'sk-… (공식 codex login --with-api-key)';
+  form.innerHTML = `<input type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="${esc(name)} API 키" placeholder="${esc(hint)}"><button type="submit" class="btn small primary">저장</button><button type="button" class="btn small cancel">취소</button>`;
+  rowEl.appendChild(form); fit();
+  const input = form.querySelector('input');
+  const close = () => { form.remove(); fit(); };
+  form.onclick = (e) => e.stopPropagation();
+  input.onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Escape') close(); };
+  form.querySelector('.cancel').onclick = close;
+  form.onsubmit = (e) => {
+    e.preventDefault(); const key = input.value.trim(); if (!key) return;
+    input.value = ''; form.querySelectorAll('input, button').forEach((x) => { x.disabled = true; });
+    runMsg(() => api.setApiKey(tool, name, key));
+  };
+  input.focus();
 }
 
 let menuEl = null;
@@ -229,6 +315,16 @@ for (const tool of TOOLS) {
   const reset = () => { add.classList.remove('open'); input.value = ''; same.checked = true; userTouchedSame = false; fit(); };
   add.querySelector('.link').onclick = () => { add.classList.add('open'); input.focus(); fit(); };
   add.querySelector('.cancel').onclick = reset;
+  add.querySelector('.addkey').onclick = () => {
+    const v = input.value.trim(); if (!v) { input.focus(); return; }
+    const folder = same.checked ? 'same' : 'random';
+    let id = null;
+    run(async () => { id = (await api.addProfile(tool, v, { shareSettings: true, folder })).id; }, `${v} 추가됨 · API 키를 입력하세요`).then(() => {
+      reset();
+      const el = id && [...document.querySelectorAll(`#${tool} .row`)].find((r) => r.dataset.name === id);
+      if (el) startKeyEntry(el, tool, id);
+    });
+  };
   add.querySelector('form').onsubmit = (e) => {
     e.preventDefault(); const v = input.value.trim(); if (!v) return;
     const folder = same.checked ? 'same' : 'random';

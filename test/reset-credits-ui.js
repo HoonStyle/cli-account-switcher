@@ -17,8 +17,9 @@ const state={density:'compact',usageMode:'remaining',directUsageApi:true,pathSta
  claude:{active:'claude',profiles:[{name:'claude',label:'Claude',loggedIn:true,plan:'Max'}]},
  codex:{active:'account0',profiles:cases.map((r,i)=>({name:'account'+i,label:['개인','업무','보조','이전 값','미제공'][i],loggedIn:true,plan:'Pro',usage:{capturedAt:now,primary:{usedPercent:25,windowMinutes:300},secondary:{usedPercent:60,windowMinutes:10080}},credits:{balance:'62500',capturedAt:now},resetCredits:r,resetAutoUse:{enabled:i===0,status:i===0?'waiting':'off',text:i===0?'만료 10분 전 자동 사용 대기':'',lastResult:i===0?{usedAt:now,resetConfirmed:true}:null}}))}}};
 let notify, selected=0, toggled=[],logs=[];
-contextBridge.exposeInMainWorld('api',{state:async()=>state,onState:fn=>notify=fn,resize:()=>{},setActive:async()=>{selected++;return state;},apiRefreshOne:async()=>'조회했습니다',setResetAutoUse:async(name,on)=>{toggled.push([name,on]);state.tools.codex.profiles.find(p=>p.name===name).resetAutoUse.enabled=on;return '설정 저장';},openResetAutoUseLog:async name=>{logs.push(name);return '로그 파일';}});
-contextBridge.exposeInMainWorld('fixture',{density:d=>{state.density=d;notify(state);},selected:()=>selected,toggled:()=>toggled,logs:()=>logs});
+const used=[];
+contextBridge.exposeInMainWorld('api',{state:async()=>state,onState:fn=>notify=fn,resize:()=>{},setActive:async()=>{selected++;return state;},apiRefreshOne:async()=>'조회했습니다',setResetAutoUse:async(name,on)=>{toggled.push([name,on]);state.tools.codex.profiles.find(p=>p.name===name).resetAutoUse.enabled=on;return '설정 저장';},checkResetCredits:async name=>{used.push(['check',name]);return '리셋권 2개';},useResetCredit:async name=>{used.push(['use',name]);return '리셋권을 사용했습니다';},openResetAutoUseLog:async name=>{logs.push(name);return '로그 파일';}});
+contextBridge.exposeInMainWorld('fixture',{used:()=>used,density:d=>{state.density=d;notify(state);},selected:()=>selected,toggled:()=>toggled,logs:()=>logs});
 `);
 app.whenReady().then(async()=>{
  const win=new BrowserWindow({show:false,width:440,height:900,webPreferences:{preload,contextIsolation:true,nodeIntegration:false}});
@@ -66,7 +67,24 @@ app.whenReady().then(async()=>{
   assert.deepEqual(toggles.toggled,[['account1',true]]);assert.deepEqual(toggles.logs,['account1']);assert.equal(toggles.selected,0);
   assert.match(toggles.text,/최근 사용.*초기화 확인/);
   await win.webContents.executeJavaScript(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}))`);
+  const manual=await win.webContents.executeJavaScript(`(async()=>{
+   const rows=()=>document.querySelectorAll('#codex .row');
+   const zeroDisabled=rows()[1].querySelector('.reset-use').disabled;
+   rows()[0].querySelector('.reset-check').click();await new Promise(r=>setTimeout(r,40));
+   let asked=null;window.confirm=m=>{asked=m;return false;};
+   rows()[0].querySelector('.reset-use').click();await new Promise(r=>setTimeout(r,40));
+   const declined=fixture.used().length;
+   window.confirm=m=>{asked=m;return true;};
+   rows()[0].querySelector('.reset-use').click();await new Promise(r=>setTimeout(r,40));
+   return {zeroDisabled,asked,declined,used:fixture.used(),selected:fixture.selected(),msg:document.querySelector('#msg').textContent};
+  })()`);
+  assert.equal(manual.zeroDisabled,true,'0 credits disables use');
+  assert.match(manual.asked,/개인 계정의 Codex 리셋권 1개를 지금 사용할까요[\s\S]*보유 2개[\s\S]*되돌릴 수 없습니다/);
+  assert.equal(manual.declined,1,'declined confirm sends nothing');
+  assert.deepEqual(manual.used,[['check','account0'],['use','account0']]);
+  assert.equal(manual.selected,0,'reset buttons never switch account');
+  assert.match(manual.msg,/사용했습니다/);
   if(process.env.UI_SCREENSHOT) fs.writeFileSync(process.env.UI_SCREENSHOT,(await win.capturePage()).toPNG());
-  console.log('PASS: reset-credit UI known/zero/unknown/error/unsupported, accessible descriptions, 2 widths × 2 densities, refresh action isolation');
+  console.log('PASS: reset-credit UI known/zero/unknown/error/unsupported, accessible descriptions, 2 widths × 2 densities, refresh action isolation, manual check/use with confirmation');
  }finally{win.destroy();}
 }).then(()=>app.quit(),e=>{console.error(e);app.exit(1);});

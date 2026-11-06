@@ -66,6 +66,9 @@ Claude Code와 Codex의 프로필을 선택하고 로컬 사용량 기록을 확
 | **터미널 출력 확인** | 주기적으로 갱신되는 작업 출력을 읽기 전용으로 확인합니다. |
 | **프로젝트 폴더 선택** | 앱의 폴더 선택 창 또는 웹 대시보드의 서버 측 폴더 탐색을 사용합니다. |
 | **OpenClaw 연동** | 선택적으로 플러그인을 설치해 현재 대화와 작업 흐름을 연결합니다. |
+| **API 키 계정** | 구독 로그인 대신 API 키로 인증하는 계정을 추가합니다. |
+| **리셋권** | 계정 화면에서 Codex 리셋권을 조회·사용하거나, 만료 전 자동 사용하게 둡니다. |
+| **Antigravity 공용 로그인** | Antigravity 공용 로그인을 저장하고 전환합니다 (한 번에 한 계정). |
 
 ## 시작하기
 
@@ -216,6 +219,27 @@ cli-accounts dashboard --port 18474
 
 사용량은 공식 CLI가 지원하는 기록을 남긴 뒤에 표시됩니다. 기록이 없거나 오래된 경우 값이 비어 있거나 현재 상태와 다를 수 있습니다. **실시간 잔액·할당량 표시는 보장하지 않습니다.**
 
+## API 키 계정
+
+계정마다 구독 로그인 대신 API 키로 인증할 수 있습니다. 키는 파이프(stdin)나 화면에 표시되지 않는 입력으로만 받고, 명령줄 인자로는 받지 않으며 출력하지 않습니다.
+
+```sh
+cli-accounts add claude api --with-api-key        # 새 계정 + 키 입력
+printf %s "$KEY" | cli-accounts apikey set codex api
+cli-accounts apikey status
+cli-accounts delegate claude --profile api -- -p "hello"
+cli-accounts apikey rm claude api
+```
+
+- **Claude**: 키를 `<데이터 폴더>/api-keys/claude/<계정>`에 0600 권한으로 저장하고, 그 계정으로 실행할 때만 `ANTHROPIC_API_KEY`로 넣습니다. 대화형 `claude`는 처음 실행 시 이 키를 쓸지 한 번 묻습니다.
+- **Codex**: 공식 `codex login --with-api-key`에 키를 넘겨 그 계정의 `CODEX_HOME`에 등록합니다. `apikey rm codex`는 API 키 로그인일 때만 로그아웃합니다.
+
+앱에서는 계정 `…` 메뉴의 **API 키 등록… / 변경… / 제거**, 로그인 안 된 계정의 **API 키** 버튼, 계정 추가 폼의 **API 키로 추가**를 씁니다. 구독 로그인이 있는 계정에 키를 넣으면 Claude는 키가 우선하고 Codex는 로그인이 키로 바뀌므로, API 키는 별도 계정으로 두세요.
+
+## Antigravity 공용 로그인 (미출시)
+
+Claude/Codex처럼 계정별 홈을 나누는 방식이 아니라, 공식 agy의 공용 로그인을 OS 키링에 저장해 두고 바꿔 끼우는 방식입니다. Antigravity 앱·IDE·CLI를 모두 종료한 뒤 확인 창이나 `cli-accounts antigravity use <name> --shared-login`으로 전환합니다. 계정별 동시 실행과 관리형 위임은 지원하지 않습니다. **사용량 조회** / `cli-accounts antigravity usage`는 공식 agy 사용량 명령을 실행해 공유 한도를 보여 줍니다. 자세한 저장·복구 방식과 검증 범위는 [docs/features/antigravity.md](docs/features/antigravity.md)를 보세요.
+
 ## OpenClaw 연동
 
 ```sh
@@ -273,7 +297,7 @@ npm run dist:win   # Windows NSIS 설치 파일 및 portable 빌드
 
 ## 제한사항
 
-- 현재 지원 목록에 활성화된 CLI는 Claude Code와 Codex입니다.
+- 현재 지원 목록에 활성화된 CLI는 Claude Code와 Codex입니다. Antigravity는 공용 로그인 전환만 지원하며 계정별 동시 실행·관리형 위임은 지원하지 않습니다.
 - Windows 설치 파일 빌드 설정은 포함되어 있지만, Windows에서 관리형 작업 실행은 지원하지 않습니다.
 - 사용량은 로컬 기록에 의존하며 서비스의 현재 할당량과 일치하지 않을 수 있습니다.
 - 프로필 전환은 기존 CLI 세션이나 다른 앱의 독립된 인증 상태를 변경하지 않습니다.

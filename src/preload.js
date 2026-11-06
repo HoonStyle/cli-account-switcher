@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
   state: () => ipcRenderer.invoke('state'),
+  antigravity: (action, value) => ipcRenderer.invoke('antigravity', action, value),
   openTasks: () => ipcRenderer.invoke('openTasks'),
   tasksAck: (id, version) => ipcRenderer.invoke('tasksAck', id, version),
   tasksStart: () => ipcRenderer.invoke('tasksStart'),
@@ -23,6 +24,8 @@ contextBridge.exposeInMainWorld('api', {
   removeProfile: (tool, name) => ipcRenderer.invoke('removeProfile', tool, name),
   rename: (tool, name, newLabel) => ipcRenderer.invoke('rename', tool, name, newLabel),
   login: (tool, name) => ipcRenderer.invoke('login', tool, name),
+  setApiKey: (tool, name, key) => ipcRenderer.invoke('setApiKey', tool, name, key),
+  removeApiKey: (tool, name) => ipcRenderer.invoke('removeApiKey', tool, name),
   installShims: () => ipcRenderer.invoke('installShims'),
   registerPath: () => ipcRenderer.invoke('registerPath'),
   usageHook: (enable) => ipcRenderer.invoke('usageHook', enable),
@@ -35,6 +38,8 @@ contextBridge.exposeInMainWorld('api', {
   apiRefreshOne: (tool, name) => ipcRenderer.invoke('apiRefreshOne', tool, name),
   setResetAutoUse: (name, on) => ipcRenderer.invoke('setResetAutoUse', name, on),
   openResetAutoUseLog: (name) => ipcRenderer.invoke('openResetAutoUseLog', name),
+  checkResetCredits: (name) => ipcRenderer.invoke('checkResetCredits', name),
+  useResetCredit: (name) => ipcRenderer.invoke('useResetCredit', name),
   setApiInterval: (min) => ipcRenderer.invoke('setApiInterval', min),
   setUsageMode: (mode) => ipcRenderer.invoke('setUsageMode', mode),
   setDensity: (d) => ipcRenderer.invoke('setDensity', d),

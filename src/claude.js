@@ -29,7 +29,9 @@ function authStatus(home) {
   let info = null;
   const bin = realClaude();
   if (bin) {
-    const env = require('./launch/profile-resolver').launchEnv({ tool: 'claude', profileId: home === P.DEFAULT_HOME.claude ? 'default' : 'profile', home });
+    let profileId = home === P.DEFAULT_HOME.claude ? 'default' : 'profile';
+    try { const store = require('./store'); profileId = store.load().claude.profiles.find((id) => store.profileHome('claude', id) === home) || profileId; } catch {}
+    const env = require('./launch/profile-resolver').launchEnv({ tool: 'claude', profileId, home });
     try {
       const out = execFileSync(bin, ['auth', 'status'], { encoding: 'utf8', env, timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'] });
       const j = JSON.parse(out.slice(out.indexOf('{')));

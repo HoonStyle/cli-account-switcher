@@ -5,12 +5,14 @@ const P = require('./paths');
 const store = require('./store');
 const claude = require('./claude');
 const codex = require('./codex');
+const apiKeys = require('./api-keys');
 const wrappers = require('./wrappers');
 const terminal = require('./terminal');
 const { modelCatalog } = require('./model-catalog');
 
 const edition = require('./edition.json');
 const INSPECT = { claude: claude.inspect, codex: codex.inspect };
+const antigravity = require('./antigravity').manager();
 let win = null;
 let tray = null;
 let tasksWin = null;
@@ -77,10 +79,11 @@ function snapshot() {
         const home = store.profileHome(tool, name);
         let info;
         try { info = INSPECT[tool](home); } catch (e) { info = { error: e.message, home }; }
-        return { name, label: store.label(state, tool, name), isDefault: name === 'default', ...info, ...(tool === 'codex' ? { resetAutoUse: resetAutoUse.summary(name) } : {}), models: modelCatalog(tool, home) };
+        return { name, label: store.label(state, tool, name), isDefault: name === 'default', ...info, ...(tool === 'claude' ? { apiKey: apiKeys.status('claude', name) } : { apiKey: { apiKey: /^api_?key$/i.test(info.authMode || ''), masked: null } }), ...(tool === 'codex' ? { resetAutoUse: resetAutoUse.summary(name) } : {}), models: modelCatalog(tool, home) };
       }),
     };
   }
+  out.antigravity = antigravity.snapshot();
   return out;
 }
 
@@ -244,6 +247,17 @@ ipcMain.handle('setResetAutoUse', async (event, name, on) => {
   refresh();
   return on ? '만료 10분 전 자동 사용을 켰습니다 · 앱이 실행 중일 때 동작합니다' : '리셋권 자동 사용을 껐습니다';
 });
+const panelOnly = (event) => { if (!win || event.sender !== win.webContents || event.senderFrame !== win.webContents.mainFrame) throw Error('계정 패널에서만 사용할 수 있습니다'); };
+ipcMain.handle('checkResetCredits', async (event, name) => {
+  panelOnly(event);
+  const r = await resetAutoUse.check(store.resolve('codex', name));
+  refresh();
+  return `리셋권 ${r.count}개${r.nearestExpiry ? ' · 가장 빠른 만료 ' + new Date(r.nearestExpiry).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}`;
+});
+ipcMain.handle('useResetCredit', async (event, name) => {
+  panelOnly(event);
+  try { return await resetAutoUse.useNow(store.resolve('codex', name)); } finally { refresh(); }
+});
 ipcMain.handle('openResetAutoUseLog', async (_event, name) => {
   const id = store.resolve('codex', name);
   const file = path.join(store.profileHome('codex', id), require('./reset-credit-auto-use').LOG);
@@ -256,9 +270,22 @@ ipcMain.handle('setDensity', (_e, d) => { store.setSetting('density', d === 'com
 
 app.on('window-all-closed', (e) => e && e.preventDefault && e.preventDefault());
 // ⌘Q / AppleScript quit / OS shutdown: let the window actually close instead of hiding.
-app.on('before-quit', () => { app.isQuitting = true; });
+app.on('before-quit', () => { antigravity.cancelUsage(); app.isQuitting = true; });
 
 ipcMain.handle('state', () => snapshot());
+ipcMain.handle('antigravity', async (_e, action, value) => {
+  if (!['check', 'save', 'activate', 'remove', 'recover', 'refreshUsage'].includes(action)) throw Error('Unsupported Antigravity action');
+  if (action === 'refreshUsage') {
+    const pending = antigravity.refreshUsage(); refresh();
+    try { return await pending; } finally { refresh(); }
+  }
+  if (action === 'activate') {
+    const answer = await dialog.showMessageBox(win, { type: 'question', buttons: ['취소', '공용 로그인 전환'], defaultId: 0, cancelId: 0,
+      message: 'Antigravity 공용 로그인을 전환할까요?', detail: '이 컴퓨터의 Antigravity 앱·IDE·CLI가 공유하는 인증을 변경합니다. 모두 종료한 뒤 전환해 주세요. 앱을 자동 종료하거나 다시 시작하지 않습니다.' });
+    if (answer.response !== 1) return { cancelled: true };
+  }
+  const result = await antigravity[action](value); refresh(); return result;
+});
 ipcMain.handle('setActive', (_e, tool, name) => { store.setActive(tool, name); refresh(); return snapshot(); });
 ipcMain.handle('addProfile', (_e, tool, name, opts) => { const r = store.addProfile(tool, name, opts); refresh(); return r; });
 ipcMain.handle('rename', (_e, tool, name, newLabel) => { const r = store.rename(tool, name, newLabel); refresh(); return r; });
@@ -274,6 +301,22 @@ ipcMain.handle('removeProfile', async (_e, tool, name) => {
   store.removeProfile(tool, name, { deleteFiles: response === 1 });
   refresh();
   return true;
+});
+ipcMain.handle('setApiKey', (_e, tool, name, key) => {
+  if (!P.TOOLS.includes(tool)) throw new Error('Unsupported tool');
+  const id = store.resolve(tool, name);
+  const r = apiKeys.register(tool, id, typeof key === 'string' ? key : '');
+  (tool === 'claude' ? claude : codex).invalidate(store.profileHome(tool, id));
+  refresh();
+  return `${store.label(store.load(), tool, id)}: API 키 등록됨 (${r.masked})${r.warning ? ' · ' + r.warning : ''}`;
+});
+ipcMain.handle('removeApiKey', (_e, tool, name) => {
+  if (!P.TOOLS.includes(tool)) throw new Error('Unsupported tool');
+  const id = store.resolve(tool, name);
+  apiKeys.unregister(tool, id);
+  (tool === 'claude' ? claude : codex).invalidate(store.profileHome(tool, id));
+  refresh();
+  return `${store.label(store.load(), tool, id)}: API 키 제거됨`;
 });
 ipcMain.handle('login', (_e, tool, name) => { terminal.openLoginTerminal(tool, store.profileHome(tool, name), name === 'default'); watchLogin(tool, name); return true; });
 ipcMain.handle('installShims', () => { const r = wrappers.installShims(); refresh(); return r; });

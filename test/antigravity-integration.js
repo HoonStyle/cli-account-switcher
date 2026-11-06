@@ -1,0 +1,61 @@
+'use strict';
+// Real main → preload → renderer IPC, using only an in-memory credential vault.
+const fs = require('fs'), os = require('os'), path = require('path'), assert = require('assert/strict');
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-integration-'));
+process.env.HOME = root; process.env.USERPROFILE = root; process.env.CLI_ACCOUNTS_ROOT = path.join(root, 'accounts');
+delete process.env.CODEX_HOME; delete process.env.CLAUDE_CONFIG_DIR;
+const { app, BrowserWindow, dialog } = require('electron');
+app.setPath('userData', path.join(root, 'electron'));
+const source = process.argv[2] ? path.resolve(process.argv[2]) : path.resolve(__dirname, '..');
+const agy = require(path.join(source, 'src/antigravity'));
+const credential = email => 'go-keyring-base64:' + Buffer.from(JSON.stringify({ token: { access_token: 'synthetic-only', token_type: 'Bearer', refresh_token: 'synthetic-refresh', expiry: '2030-01-01T00:00:00Z', expires_in: 3600 }, auth_method: 'consumer', id_token_email: email })).toString('base64');
+const entries = new Map(), shared = 'gemini/antigravity';
+let reads = 0, writes = 0;
+const vault = { get: async (s, a) => { reads++; return entries.get(s + '/' + a) ?? null; }, set: async (s, a, v) => { writes++; entries.set(s + '/' + a, v); }, remove: async (s, a) => { writes++; entries.delete(s + '/' + a); } };
+let usageCalls = 0;
+const manager = agy.createManager({ vault, processes: () => [], usageFetcher: async () => {
+  usageCalls++;
+  return require(path.join(source, 'src/antigravity-usage')).parseReport({ status: 'SUCCESS', command: { name: 'usage', data: { groups: [{ name: 'Gemini Models', buckets: [{ id: 'gemini-weekly', window: 'weekly', remaining_fraction: .8 }] }, { name: 'Claude and GPT models', buckets: [{ id: '3p-weekly', window: 'weekly', remaining_fraction: .9 }] }] } } });
+} });
+agy.manager = () => manager;
+const state = require(path.join(source, 'src/store'));
+state.save({ version: 1, apiFetch: false, claude: { active: 'default', profiles: [] }, codex: { active: 'default', profiles: [] }, realBin: {} });
+let response = 0, prompts = 0;
+dialog.showMessageBox = async (_win, options) => {
+  prompts++; assert.equal(options.defaultId, 0); assert.equal(options.cancelId, 0);
+  assert.match(options.detail, /앱·IDE·CLI/); return { response };
+};
+require(path.join(source, 'src/main'));
+async function until(fn) { const end = Date.now() + 12000; while (Date.now() < end) { if (await fn()) return; await new Promise(r => setTimeout(r, 40)); } throw Error('renderer timeout'); }
+app.whenReady().then(async () => {
+  await until(() => BrowserWindow.getAllWindows().length);
+  const win = BrowserWindow.getAllWindows()[0];
+  await until(() => win.webContents.executeJavaScript('Boolean(window.api && document.querySelector("#agy-save"))').catch(() => false));
+  assert.equal(reads, 0, 'startup never reads the OS keyring');
+  entries.set(shared, credential('one@example.invalid'));
+  const checked = await win.webContents.executeJavaScript('api.antigravity("check")');
+  assert.equal(checked.current.email, 'one@example.invalid');
+  await until(() => win.webContents.executeJavaScript('document.querySelector("#antigravity").textContent.includes("one@example.invalid")'));
+  const saved = await win.webContents.executeJavaScript('api.antigravity("save", "one")');
+  assert.equal(saved.accounts.length, 1);
+  const readsBeforeQuota = reads, writesBeforeQuota = writes;
+  const quota = await win.webContents.executeJavaScript('api.antigravity("refreshUsage")');
+  assert.equal(quota.usage.groups.length, 2); assert.equal(usageCalls, 1);
+  assert.equal(reads, readsBeforeQuota); assert.equal(writes, writesBeforeQuota);
+  await until(() => win.webContents.executeJavaScript('document.querySelectorAll(".agy-quota-group").length === 2'));
+  entries.set(shared, credential('two@example.invalid'));
+  const before = writes;
+  const cancelled = await win.webContents.executeJavaScript('api.antigravity("activate", "one")');
+  assert.equal(cancelled.cancelled, true); assert.equal(writes, before); assert.equal(entries.get(shared), credential('two@example.invalid'));
+  response = 1;
+  const switched = await win.webContents.executeJavaScript('api.antigravity("activate", "one")');
+  assert.equal(switched.current.email, 'one@example.invalid'); assert.equal(entries.get(shared), credential('one@example.invalid')); assert.equal(prompts, 2);
+  assert.equal(switched.usage, null, 'switch invalidates old shared quota');
+  await assert.rejects(win.webContents.executeJavaScript('api.antigravity("set", "forbidden")'), /Unsupported Antigravity action/);
+  const live = entries.get(shared);
+  await win.webContents.executeJavaScript('api.antigravity("remove", "one")');
+  assert.equal(entries.get(shared), live);
+  console.log('PASS real main/preload/renderer: zero startup keyring reads, encoded login check/display, save, cancel without writes, confirmed switch, action allowlist, remove without logout');
+  app.isQuitting = true; app.quit();
+}).catch(e => { console.error(e); app.exit(1); });
+app.on('will-quit', () => fs.rmSync(root, { recursive: true, force: true }));

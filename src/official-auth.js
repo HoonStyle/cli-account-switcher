@@ -15,10 +15,11 @@ function codexIdentity(home) {
     const profile = state.codex.profiles.find(id => store.profileHome('codex', id) === home);
     if (!profile) throw new Error('Unknown profile');
     const binding = resolveProfile('codex', profile);
-    execFileSync(binding.executable, ['login', 'status'], {
-      env: launchEnv(binding), timeout: 8000, stdio: 'ignore', windowsHide: true,
+    const out = execFileSync(binding.executable, ['login', 'status'], {
+      env: launchEnv(binding), timeout: 8000, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', windowsHide: true,
     });
-    info = { ...info, loggedIn: true };
+    // Only the mode is kept; the status text itself may include a key prefix.
+    info = { ...info, loggedIn: true, authMode: /api key/i.test(out || '') ? 'apiKey' : 'login' };
   } catch {}
   cache.set(home, { at: Date.now(), info });
   return info;

@@ -182,6 +182,27 @@ async function test(name, fn) { await fn(); checks++; console.log('PASS ' + name
     sent=[];await assert.rejects(rpc.consume(root,{creditId:'specific',idempotencyKey:'test'},{...opts,beforeSend:()=>false}));assert(!sent.some(m=>m.method.endsWith('/consume')));
     sent=[];await assert.rejects(rpc.consume(root,{creditId:'specific',idempotencyKey:'test'},{...opts,expectedAccountKey:'changed'}));assert(!sent.some(m=>m.method.endsWith('/consume')));
   });
+  await test('manual use: confirms nothing auto, redeems earliest credit once, shares idempotency with auto-use, keeps active account', async () => {
+    const f=fixture('manual'), c=f.rows()[0]; f.setRows([{...c,id:'later',expiresAt:c.expiresAt+86400}, {...c,id:'first',expiresAt:c.expiresAt+3600}]);
+    assert.deepEqual(await f.service.check('work'), { count: 2, nearestExpiry: new Date((c.expiresAt+3600)*1000).toISOString() }); assert.equal(f.calls.length,0,'check never consumes');
+    f.consume(p=>{f.setRows(f.rows().filter(r=>r.id!==p.creditId));f.setUsed(0);return 'reset';});
+    assert.match(await f.service.useNow('work'), /사용했습니다 · 한도 초기화 확인/);
+    assert.deepEqual(f.calls, [{creditId:'first',idempotencyKey:redemptionKey('first')}]);
+    assert.deepEqual(f.log().map(l=>[l.event,l.trigger]), [['attempt','manual'],['result','manual'],['verification',undefined]]);
+    assert(!fs.readFileSync(path.join(f.home,LOG),'utf8').includes('"first"'),'opaque ID excluded from logs');
+    assert.equal(f.store.load().codex.active,'untouched'); assert.equal(f.service.summary('work').enabled,false,'manual use does not enable auto-use');
+    // Auto-use later does not redeem the credit the manual path already used.
+    f.setRows([{...c,id:'first',expiresAt:c.expiresAt}]); await f.service.setEnabled('work',true); assert.equal(f.calls.length,1);
+  });
+  await test('manual use: no credit, nothingToReset and unknown outcome are explicit failures', async () => {
+    const f=fixture('manual-fail'); f.setRows([]);
+    await assert.rejects(f.service.useNow('work'), /사용 가능한 리셋권이 없습니다/); assert.equal(f.calls.length,0);
+    f.setRows([{ id:'x', resetType:'codexRateLimits', status:'available', expiresAt: Date.parse('2026-10-23T00:00:00Z')/1000+3600 }]);
+    f.consume(()=>'nothingToReset'); await assert.rejects(f.service.useNow('work'), /초기화할 한도가 없어/);
+    f.consume(()=>{throw Error('secret detail');}); await assert.rejects(f.service.useNow('work'), e => /결과를 확인하지 못했습니다/.test(e.message) && !e.message.includes('secret'));
+    assert.deepEqual(f.calls.map(c=>c.idempotencyKey), [redemptionKey('x'),redemptionKey('x')]);
+    await assert.rejects(f.service.useNow('nobody'), /계정이 올바르지 않습니다/);
+  });
   assert.equal(resetObserved({},{}),null);assert.match(redemptionKey('a'),/^[a-f0-9-]{36}$/);
   console.log(`PASS ${checks} auto-use regression scenarios (synthetic accounts only)`);
 })().catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>fs.rmSync(root,{recursive:true,force:true}));

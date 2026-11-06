@@ -66,6 +66,9 @@ A reference design for displaying per-account usage and record timestamps. **Thi
 | **Read-only terminal output** | Inspect task output with periodic refresh. |
 | **Project selection** | Use a native folder picker in the app or server-side folder browsing in the dashboard. |
 | **Optional OpenClaw integration** | Connect managed work to the current conversation through a plugin. |
+| **API key profiles** | Authenticate a profile with an API key instead of a subscription login. |
+| **Reset credits** | Check and use Codex reset credits from the account panel, or let them auto-use before expiry. |
+| **Antigravity shared login** | Save and switch the shared Antigravity login (one account at a time). |
 
 ## Getting started
 
@@ -244,6 +247,25 @@ The server binds to `127.0.0.1` by default and validates the host, Origin, and r
 
 Usage appears after the CLI writes a supported local record. Missing or older records can leave values unavailable or out of date. **Real-time balances and quotas are not guaranteed.**
 
+## API key profiles
+
+A profile can authenticate with an API key instead of a subscription login. Keys are read from piped stdin or a hidden prompt, never from command-line arguments, and are never printed.
+
+```sh
+cli-accounts add claude api --with-api-key        # new profile + key (hidden prompt)
+printf %s "$KEY" | cli-accounts apikey set codex api
+cli-accounts apikey status
+cli-accounts delegate claude --profile api -- -p "hello"
+cli-accounts apikey rm claude api
+```
+
+- **Claude**: the key is stored at `<data root>/api-keys/claude/<profile>` (mode 0600) and injected as `ANTHROPIC_API_KEY` only into processes launched for that profile (shim, `run`, `delegate`, managed tasks). Inherited `ANTHROPIC_*` variables are still stripped. Interactive `claude` asks once to approve the key.
+- **Codex**: the key is passed via stdin to the official `codex login --with-api-key` with that profile's `CODEX_HOME`; Codex stores it. `apikey rm codex` runs `codex logout` only when the profile is in API-key mode.
+
+In the app, each account's `…` menu has **API 키 등록… / 변경… / 제거**, logged-out rows show an **API 키** button next to **로그인**, and the add form has **API 키로 추가**. The key field shows what you type; the key is sent once to the main process and never kept in the UI state (Claude rows show only the last 4 characters).
+
+Use a separate profile for API keys: on a profile that also has a subscription login, the Claude key takes precedence and the Codex key replaces the login.
+
 ## OpenClaw integration
 
 ```sh
@@ -299,9 +321,13 @@ The [verification and build workflow](.github/workflows/ci.yml) runs basic tests
 
 Manual dispatch (`workflow_dispatch`) builds installers and retains artifacts for seven days. The separate [publish workflow](.github/workflows/publish-release.yml) takes the successful build run ID and exact commit SHA, verifies provenance, and publishes a prerelease with installer checksums. Signing, notarization, and Windows runtime validation remain separate tasks.
 
+## Antigravity (unreleased)
+
+Antigravity adds an explicit shared-login adapter, distinct from Claude/Codex's home-isolated profiles. Save the current official agy login in the OS keyring, close all Antigravity surfaces, then switch through the confirmation dialog or `cli-accounts antigravity use <name> --shared-login`. It is not available for pinned/managed delegation. Unlike Claude/Codex inspection, this feature explicitly reads and saves the official Antigravity credential when the user requests check/save/switch; it does not perform background credential scans or usage API calls. Explicit **사용량 조회** / `cli-accounts antigravity usage` invokes the official agy JSON usage command and shows one row per shared quota pool, with only the reported time windows. See [storage, recovery, and verification limits](docs/features/antigravity.md).
+
 ## Limitations
 
-- The currently enabled CLIs are Claude Code and Codex.
+- The currently enabled CLIs are Claude Code and Codex. Antigravity is a shared login switch only: no per-account concurrent launch or managed delegation.
 - Windows installer build configuration is included, but managed task execution on Windows is not supported.
 - Usage depends on local records and may differ from current provider quotas.
 - Profile switching does not change existing CLI sessions or other apps' independent authentication.

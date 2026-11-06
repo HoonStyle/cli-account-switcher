@@ -62,14 +62,15 @@ function cmdList() {
     console.log(JSON.stringify({
       installation: { edition: edition.name || edition.dataDirectory, dataRoot: P.ROOT },
       execution: { command: 'delegate', profileRequired: true, changesActiveAccount: false, fallbackToActive: false },
-      accounts: ts.flatMap(t => state[t].profiles.map(profileId => ({ tool: t, profileId, active: state[t].active === profileId }))),
+      accounts: ts.flatMap(t => state[t].profiles.map(profileId => ({ tool: t, profileId, active: state[t].active === profileId, ...(t === 'claude' ? { apiKey: require('./api-keys').status('claude', profileId).apiKey } : {}) }))),
     }, null, 2));
     return;
   }
   for (const t of ts) {
     console.log(`${t}:`);
     for (const p of profiles(t)) {
-      const id = p.loggedIn ? `${p.email || '이메일 미확인'}${p.plan ? ' · ' + p.plan : ''}` : '(로그인 안 됨)';
+      const key = t === 'claude' && require('./api-keys').status('claude', p.name).apiKey;
+      const id = key ? `API 키 ${require('./api-keys').status('claude', p.name).masked}` : p.loggedIn ? `${p.email || '이메일 미확인'}${p.plan ? ' · ' + p.plan : ''}` : '(로그인 안 됨)';
       console.log(`  ${p.active ? '*' : ' '} ${pad(shown(p), 14)} ${id}`);
     }
   }
@@ -138,14 +139,16 @@ function cmdUse() {
   console.log('새로 실행하는 세션부터 적용됩니다. 이미 열린 세션은 영향받지 않습니다.');
 }
 
-function cmdAdd() {
+async function cmdAdd() {
   const t = tool(a1);
   if (!a2) die('계정 이름이 필요합니다');
   const folder = flags.has('--random-folder') ? 'random' : flags.has('--same-folder') ? 'same' : 'auto';
   const r = store.addProfile(t, a2, { shareSettings: !flags.has('--no-share'), folder });
   console.log(`추가됨: ${r.label}${r.id !== r.label ? ` (폴더 ${r.id})` : ''} → ${r.home}`);
   if (r.linked.length) console.log(`공유 링크: ${r.linked.join(', ')}`);
+  if (flags.has('--with-api-key')) return setApiKey(t, r.id);
   console.log(`로그인: cli-accounts login ${t} ${JSON.stringify(a2).replace(/^"|"$/g, '')}`);
+  console.log(`또는 API 키: cli-accounts apikey set ${t} ${JSON.stringify(a2).replace(/^"|"$/g, '')}`);
 }
 
 function cmdRm() {
@@ -176,6 +179,81 @@ function cmdLogin() {
     console.log(`set "CLI_ACCOUNTS_ROOT=${P.ROOT}" && node "${runner}" login ${t} "${name}"`);
   } else console.log(`CLI_ACCOUNTS_ROOT=${quote(P.ROOT)} node ${quote(runner)} login ${t} ${quote(name)}`);
   if (flags.has('--open')) require('./terminal').openLoginTerminal(t, home, name === 'default');
+}
+
+// Reads an API key from piped stdin, or from a hidden prompt on a TTY. Never from argv.
+async function readSecret(prompt) {
+  if (!process.stdin.isTTY) {
+    let data = '';
+    process.stdin.setEncoding('utf8');
+    for await (const chunk of process.stdin) { data += chunk; if (data.length > 4096) throw new Error('입력이 너무 깁니다'); }
+    return data;
+  }
+  return new Promise((resolve, reject) => {
+    process.stderr.write(prompt);
+    const stdin = process.stdin;
+    let value = '';
+    stdin.setRawMode(true); stdin.resume(); stdin.setEncoding('utf8');
+    const done = (err) => { stdin.setRawMode(false); stdin.pause(); stdin.removeListener('data', onData); process.stderr.write('\n'); err ? reject(err) : resolve(value); };
+    const onData = (s) => {
+      for (const ch of s) {
+        if (ch === '\r' || ch === '\n' || ch === '\u0004') return done();
+        if (ch === '\u0003') return done(new Error('취소됨'));
+        if (ch === '\u007f' || ch === '\b') value = value.slice(0, -1);
+        else if (ch >= ' ') value += ch;
+      }
+    };
+    stdin.on('data', onData);
+  });
+}
+
+async function setApiKey(t, name) {
+  const keys = require('./api-keys');
+  const id = store.resolve(t, name);
+  const raw = await readSecret(`${t} / ${name} API 키 (입력은 표시되지 않음): `);
+  const r = keys.register(t, id, raw, { stdio: 'inherit' });
+  require(t === 'claude' ? './claude' : './codex').invalidate(store.profileHome(t, id));
+  if (r.warning) console.error(`경고: ${r.warning}`);
+  if (t === 'claude') {
+    console.log(`claude / ${name}: API 키 등록됨 (${r.masked})`);
+    console.log('이 프로필로 실행하는 claude는 구독 로그인 대신 ANTHROPIC_API_KEY로 인증합니다 (API 사용량 과금).');
+    console.log('대화형 claude는 처음 실행 시 이 키를 사용할지 한 번 묻습니다.');
+  } else console.log(`codex / ${name}: API 키로 로그인됨 (${r.masked}, CODEX_HOME=${r.home})`);
+}
+
+async function cmdApiKey() {
+  const sub = a1;
+  const keys = require('./api-keys');
+  if (sub === 'set' || sub === 'add') {
+    const t = tool(a2), name = args[3];
+    if (!name) die('사용법: cli-accounts apikey set <claude|codex> <name>   (키는 stdin 또는 숨김 입력)');
+    if (args[4]) die('API 키를 명령줄 인자로 넘기지 마세요. 파이프(stdin)나 숨김 입력을 사용하세요.');
+    return setApiKey(t, name);
+  }
+  if (sub === 'rm' || sub === 'remove') {
+    const t = tool(a2), name = args[3];
+    if (!name) die('사용법: cli-accounts apikey rm <claude|codex> <name>');
+    const id = store.resolve(t, name);
+    let r;
+    try { r = keys.unregister(t, id, { stdio: 'inherit' }); } catch (e) { die(`${t} / ${name}: ${e.message}`); }
+    require(t === 'claude' ? './claude' : './codex').invalidate(store.profileHome(t, id));
+    console.log(t === 'codex' ? `codex / ${name}: API 키 로그아웃됨` : r.removed ? `claude / ${name}: API 키 제거됨 (구독 로그인이 있으면 그것을 사용)` : `claude / ${name}: 등록된 API 키 없음`);
+    return;
+  }
+  // status
+  const ts = sub && sub !== 'status' ? [tool(sub)] : a2 ? [tool(a2)] : TOOLS;
+  const st = store.load();
+  const rows = [];
+  for (const t of ts) {
+    for (const id of st[t].profiles) {
+      let info;
+      if (t === 'claude') info = keys.status('claude', id);
+      else { try { info = { apiKey: keys.codexApiKeyMode(require('./launch/profile-resolver').resolveProfile('codex', id)).apiKey, masked: null }; } catch { info = { apiKey: false, masked: null }; } }
+      rows.push({ tool: t, profileId: id, label: store.label(st, t, id), ...info });
+    }
+  }
+  if (flags.has('--json')) { console.log(JSON.stringify(rows, null, 2)); return; }
+  for (const r of rows) console.log(`${pad(r.tool, 7)} ${pad(r.label !== r.profileId ? `${r.label} (${r.profileId})` : r.profileId, 20)} ${r.apiKey ? `API 키${r.masked ? ' ' + r.masked : ''}` : '-'}`);
 }
 
 function cmdApi() {
@@ -210,6 +288,8 @@ function cmdPath() {
 function help() {
   console.log(`cli-accounts <command>
   도구: claude | codex
+  antigravity (또는 agy) list|check|usage|save <name>|use <name> --shared-login|remove <name>|recover
+                                          Antigravity 공용 로그인 저장·전환 (격리 실행 미지원)
   delegate <tool> --profile <id> [--context task.json] -- <args...> 작업별 위임 (프로필 필수, 전역 전환 금지)
   run <tool> [--profile <id>] -- <args...>  활성 계정 변경 없이 고정 실행
   dashboard [--port N] [--public-origin URL] 로컬 웹 작업 관리
@@ -223,6 +303,10 @@ ${edition.directUsageApi ? '  api   [on|off] | interval <분>           서버 �
   rm    <claude|codex> <name> [--delete-files]  계정 제거
   rename <claude|codex> <name> <new-name>  표시 이름 변경 (폴더·로그인은 그대로)
   login <claude|codex> [name] [--open]     로그인 명령 출력 (--open: 새 터미널 창)
+  apikey set <claude|codex> <name>         API 키 등록 (stdin 파이프 또는 숨김 입력; 인자로 넘기지 않음)
+  apikey rm  <claude|codex> <name>         API 키 제거 (구독 로그인은 그대로)
+  apikey [status] [claude|codex] [--json]  프로필별 API 키 등록 상태
+  add <claude|codex> <name> --with-api-key API 키 전용 계정 추가 + 키 등록
   path  [register]                         래퍼 PATH 상태 확인 / 셸 설정에 등록
 다른 계정에 작업 위임: list --json → delegate <tool> --profile <id> -- <args...>
 요청한 프로필이 없으면 중단하고 설치본을 확인하세요. use/switch로 대체하거나 인증 정보를 복사하지 마세요.
@@ -231,10 +315,14 @@ ${edition.directUsageApi ? '  api   [on|off] | interval <분>           서버 �
 
 (async () => {
   try {
+    if (['antigravity', 'agy'].includes(argv[0])) { await require('./antigravity-cli').run(argv.slice(1)); return; }
+    if (['antigravity', 'agy'].includes(argv[1]) && ['list', 'add', 'use', 'switch', 'rm', 'remove', 'login'].includes(argv[0])) {
+      await require('./antigravity-cli').run([argv[0], ...argv.slice(2)]); return;
+    }
     if (argv[0] === 'delegate') { await require('./launch/run').runCommand(argv.slice(1), { requireProfile: true }); return; }
     if (argv[0] === 'run') { await require('./launch/run').runCommand(argv.slice(1)); return; }
     if (argv[0] === 'dashboard') { await require('./dashboard/server').run(argv.slice(1)); return; }
     if (argv[0] === 'tasks') { await require('./runtime/cli').run(argv.slice(1)); return; }
-    await ({ list: cmdList, ls: cmdList, use: cmdUse, switch: cmdUse, usage: cmdUsage, api: cmdApi, display: cmdDisplay, path: cmdPath, add: cmdAdd, rm: cmdRm, remove: cmdRm, rename: cmdRename, mv: cmdRename, login: cmdLogin }[cmd] || help)();
+    await ({ list: cmdList, ls: cmdList, use: cmdUse, switch: cmdUse, usage: cmdUsage, api: cmdApi, display: cmdDisplay, path: cmdPath, add: cmdAdd, rm: cmdRm, remove: cmdRm, rename: cmdRename, mv: cmdRename, login: cmdLogin, apikey: cmdApiKey, 'api-key': cmdApiKey }[cmd] || help)();
   } catch (e) { die(e.message); }
 })();

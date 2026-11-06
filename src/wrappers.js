@@ -127,7 +127,7 @@ function installShims() {
   // Self-contained copy of the modules the console CLI needs, so it works without the app running.
   fs.mkdirSync(P.LIB_DIR, { recursive: true });
   const edition = require('./edition.json');
-  const modules = ['edition.json', 'paths.js', 'store.js', 'claude.js', 'codex.js', 'codex-reset-credits.js', 'model-catalog.js', 'project-folders.js', 'official-auth.js', 'terminal.js', 'wrappers.js', 'cli.js'];
+  const modules = ['edition.json', 'paths.js', 'store.js', 'claude.js', 'codex.js', 'codex-reset-credits.js', 'model-catalog.js', 'project-folders.js', 'official-auth.js', 'terminal.js', 'wrappers.js', 'cli.js', 'api-keys.js', 'antigravity.js', 'antigravity-cli.js', 'antigravity-usage.js'];
   if (edition.credentialMetadata) modules.push('claude-cred.js', 'codex-identity.js');
   if (edition.directUsageApi) modules.push('usage-api.js', 'gemini.js');
   for (const f of modules) {
@@ -146,6 +146,30 @@ function installShims() {
     };
     if (fs.existsSync(source)) copyTree(source, path.join(P.LIB_DIR, dir));
   }
+  // The standalone CLI also needs its native keyring binding and lock library.
+  // Copy files individually: Electron's ASAR directory cpSync is not supported.
+  const copied = new Set();
+  function copyDependency(name, optional = false) {
+    if (copied.has(name)) return;
+    let source;
+    try { source = path.dirname(require.resolve(name + '/package.json')); }
+    catch (e) { if (optional) return; throw e; }
+    copied.add(name);
+    const copyTree = (from, to) => {
+      fs.mkdirSync(to, { recursive: true });
+      for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
+        if (entry.name === 'node_modules') continue;
+        const input = path.join(from, entry.name), output = path.join(to, entry.name);
+        if (entry.isDirectory()) copyTree(input, output);
+        else if (entry.isFile()) fs.copyFileSync(input, output);
+      }
+    };
+    copyTree(source, path.join(P.LIB_DIR, 'node_modules', name));
+    const pkg = JSON.parse(fs.readFileSync(path.join(source, 'package.json'), 'utf8'));
+    for (const dep of Object.keys(pkg.dependencies || {})) copyDependency(dep);
+    for (const dep of Object.keys(pkg.optionalDependencies || {})) copyDependency(dep, true);
+  }
+  copyDependency('@napi-rs/keyring'); copyDependency('proper-lockfile');
   if (P.IS_WIN) {
     fs.writeFileSync(path.join(P.BIN_DIR, 'cli-accounts.cmd'), cliLauncherCmd());
   } else {

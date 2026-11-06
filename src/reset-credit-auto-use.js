@@ -228,6 +228,70 @@ function createAutoUse(store, options = {}) {
       if (!limited) notice(profile, 'waiting', credits.length ? '만료 10분 전 자동 사용 대기' : '만료 시각이 확인된 리셋권 없음');
     } finally { await release().catch(() => {}); }
   }
+  // Read the official reset-credit list for a profile and cache the display count.
+  async function check(profile) {
+    if (!store.load().codex.profiles.includes(profile)) throw Error('계정이 올바르지 않습니다');
+    const home = store.profileHome('codex', profile);
+    const details = await read(home);
+    record(home, details, now());
+    onChange();
+    const credits = availableCredits(details, now());
+    return { count: Number.isSafeInteger(details?.credits?.availableCount) ? details.credits.availableCount : credits.length, nearestExpiry: credits[0] ? stamp(credits[0].expiresAt * 1000) : null };
+  }
+  // Manual redemption of the nearest-expiring credit. Shares the auto-use lock, per-credit
+  // idempotency key, attempt state and audit log, so auto-use never redeems it again.
+  async function useNow(profile) {
+    if (!store.load().codex.profiles.includes(profile)) throw Error('계정이 올바르지 않습니다');
+    const home = store.profileHome('codex', profile);
+    let release, compromised = false;
+    try {
+      release = await lockfile.lock(home, { lockfilePath: path.join(home, 'reset-auto-use.lock'), stale: 60000, update: 10000, retries: 0, onCompromised: () => { compromised = true; } });
+    } catch (e) { throw Error(e.code === 'ELOCKED' ? '이 계정의 리셋권을 처리 중입니다 · 잠시 후 다시 시도하세요' : '리셋권 사용 기록에 접근할 수 없습니다'); }
+    try {
+      const state = readState(home);
+      const details = await read(home);
+      if (!details.accountKey) throw Error('ChatGPT 계정을 확인할 수 없습니다');
+      record(home, details, now());
+      const credit = availableCredits(details, now())[0];
+      if (!credit) { onChange(); throw Error('사용 가능한 리셋권이 없습니다'); }
+      state.attempts ||= {};
+      const key = hash(`${details.accountKey}:${credit.id}`), previous = state.attempts[key];
+      if (succeeded(previous?.outcome)) throw Error('이 리셋권은 이미 사용 처리되었습니다 · 다시 조회하세요');
+      const attempt = previous?.outcome === 'pending' ? previous : {
+        accountKey: details.accountKey, creditId: credit.id, idempotencyKey: redemptionKey(credit.id), attemptedAt: stamp(now()),
+        expiresAt: credit.expiresAt, before: limits(details.rateLimits), outcome: 'pending',
+      };
+      attempt.attemptCount = (Number.isSafeInteger(attempt.attemptCount) ? attempt.attemptCount : 0) + 1;
+      attempt.nextAttemptAt = now() + RETRY_MS; attempt.trigger = 'manual';
+      state.attempts[key] = attempt;
+      saveState(home, state); // Reserve idempotency BEFORE the network mutation.
+      appendLog(home, { event: 'attempt', trigger: 'manual', profile, credit: key, idempotencyKey: attempt.idempotencyKey, attemptCount: attempt.attemptCount, attemptedAt: attempt.attemptedAt, requestedAt: stamp(now()), expiresAt: stamp(credit.expiresAt * 1000), before: attempt.before });
+      let outcome;
+      try {
+        outcome = await consume(home, { creditId: credit.id, idempotencyKey: attempt.idempotencyKey }, { expectedAccountKey: details.accountKey, beforeSend: () => !compromised });
+      } catch {
+        const result = { event: 'result', trigger: 'manual', profile, credit: key, idempotencyKey: attempt.idempotencyKey, attemptCount: attempt.attemptCount, attemptedAt: attempt.attemptedAt, respondedAt: stamp(now()), apiOutcome: 'unknown', resetConfirmed: null, error: '사용 결과 미확인' };
+        appendLog(home, result); state.lastResult = result; saveState(home, state); onChange();
+        throw Error('사용 결과를 확인하지 못했습니다 · 다시 조회해 확인하세요 (같은 리셋권은 중복 사용되지 않습니다)');
+      }
+      attempt.outcome = outcome;
+      attempt.usedAt = outcome === 'reset' ? stamp(now()) : null;
+      attempt.acknowledgedAt = stamp(now());
+      attempt.needsVerification = succeeded(outcome);
+      const result = { event: 'result', trigger: 'manual', profile, credit: key, idempotencyKey: attempt.idempotencyKey, attemptCount: attempt.attemptCount,
+        attemptedAt: attempt.attemptedAt, usedAt: attempt.usedAt, acknowledgedAt: attempt.acknowledgedAt, respondedAt: stamp(now()), apiOutcome: outcome,
+        serverResetAcknowledged: succeeded(outcome), resetConfirmed: succeeded(outcome) ? null : false, before: attempt.before, after: null };
+      state.lastResult = result; saveState(home, state); appendLog(home, result);
+      if (!succeeded(outcome)) { onChange(); throw Error(outcome === 'nothingToReset' ? '초기화할 한도가 없어 사용되지 않았습니다' : '사용 가능한 리셋권이 없습니다'); }
+      let confirmed = null;
+      try {
+        const after = await read(home);
+        if (after.accountKey === details.accountKey) { record(home, after, now()); confirmed = verify(home, profile, key, attempt, after, state).resetConfirmed; }
+      } catch {}
+      onChange();
+      return (outcome === 'alreadyRedeemed' ? '이미 처리된 사용 확인' : '리셋권을 사용했습니다') + (confirmed ? ' · 한도 초기화 확인' : ' · 초기화 미확인 (잠시 후 조회)');
+    } finally { await release().catch(() => {}); }
+  }
   async function tick(force = false) {
     if (running || stopped) return;
     running = true;
@@ -247,6 +311,6 @@ function createAutoUse(store, options = {}) {
     tick(true);
     return () => { stopped = true; timers.clearInterval(timer); powerMonitor?.removeListener('resume', resume); };
   }
-  return { setEnabled, summary, tick, start };
+  return { setEnabled, summary, tick, start, check, useNow };
 }
 module.exports = { createAutoUse, availableCredits, resetObserved, redemptionKey, WINDOW_MS, TICK_MS, MAX_ATTEMPTS, RETRY_MS, STATE, LOG };

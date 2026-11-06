@@ -68,6 +68,12 @@ function launchEnv(binding, baseEnv = process.env) {
     env.HOME = P.HOME;
     if (P.IS_WIN) env.USERPROFILE = P.HOME;
   } else env[P.ENV_VAR[binding.tool]] = binding.home;
+  // A Claude profile with a registered API key uses it instead of its subscription login.
+  // Only the key registered for this exact profile is injected; inherited keys were removed above.
+  if (binding.tool === 'claude') {
+    const key = require('../api-keys').read('claude', binding.profileId);
+    if (key) env.ANTHROPIC_API_KEY = key;
+  }
   return env;
 }
 module.exports = { resolveProfile, validateBinding, launchEnv };

@@ -120,6 +120,7 @@ function removeProfile(tool, nameOrLabel, { deleteFiles = false } = {}) {
   if (state.apiMeta) delete state.apiMeta[`${tool}/${name}`];
   if (state[tool].active === name) state[tool].active = 'default';
   save(state);
+  require('./api-keys').remove(tool, name);
   if (deleteFiles) fs.rmSync(profileHome(tool, name), { recursive: true, force: true });
 }
 

@@ -58,3 +58,12 @@ Codex 계정의 더 보기 메뉴 → **만료 10분 전 리셋권 자동 사용
 - ARM64 개인 앱 빌드 및 패키지의 실제 UI→IPC→공식 CLI 프로토콜→사용 후 조회→기록→옵션 해제 통합 검증 통과(가상 계정).
 - 초기 통합 픽스처에서 설치기의 실행파일 재탐색 때문에 가짜 바이너리가 덮어써지는 문제를 발견했습니다. 테스트의 HOME뿐 아니라 로그인 셸/PATH도 격리하여 실제 CLI나 계정으로 빠지지 않도록 수정했습니다.
 - 배포 내보내기의 기존 누락 테스트(runtime-context, delegation, account-route)를 허용 목록에 복원했습니다. 동시 요청 테스트는 어느 기기가 먼저인지 가정하지 않고 결과 집합에서 성공 1건/기처리 1건을 검증합니다.
+
+## Manual check and use
+
+Each Codex account's 리셋권 cell has **조회** and **지금 사용** buttons (also in the `…` menu as 리셋권 조회 / 리셋권 지금 사용…). Both go through the profile's official `codex app-server` RPC; they never change the active account.
+
+- **조회** reads `account/rateLimits/read` and updates the displayed count and nearest expiry. It never consumes a credit.
+- **지금 사용** asks for confirmation first, then redeems the earliest-expiring credit with `account/rateLimitResetCredit/consume`. It shares the auto-use lock, per-credit idempotency key, attempt state and `reset-auto-use.jsonl` log (entries carry `"trigger":"manual"`), so auto-use never redeems the same credit again. It is disabled when the known count is 0.
+- An unknown result (timeout, lost response) is reported, not retried; using it again re-sends the same idempotency key, so a credit cannot be spent twice.
+
