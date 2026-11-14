@@ -7,11 +7,13 @@
 //   cli-accounts add <claude|codex> <profile> [--no-share]
 //   cli-accounts rm <claude|codex> <profile> [--delete-files]
 //   cli-accounts login <claude|codex> [profile]
+//   cli-accounts exaone list|add|rm|use|apikey|check|env|run   (EXAONE API key accounts; see exaone-cli.js)
 const path = require('path');
 const P = require('./paths');
 const store = require('./store');
 const edition = require('./edition.json');
 const inspectors = { claude: require('./claude').inspect, codex: require('./codex').inspect };
+const { readSecret } = require('./secret-input');
 
 const TOOLS = P.TOOLS;
 const argv = process.argv.slice(2);
@@ -62,7 +64,11 @@ function cmdList() {
     console.log(JSON.stringify({
       installation: { edition: edition.name || edition.dataDirectory, dataRoot: P.ROOT },
       execution: { command: 'delegate', profileRequired: true, changesActiveAccount: false, fallbackToActive: false },
-      accounts: ts.flatMap(t => state[t].profiles.map(profileId => ({ tool: t, profileId, active: state[t].active === profileId, ...(t === 'claude' ? { apiKey: require('./api-keys').status('claude', profileId).apiKey } : {}) }))),
+      accounts: [
+        ...ts.flatMap(t => state[t].profiles.map(profileId => ({ tool: t, profileId, active: state[t].active === profileId, ...(t === 'claude' ? { apiKey: require('./api-keys').status('claude', profileId).apiKey } : {}) }))),
+        // EXAONE accounts are listed for discovery only; they have no CLI to pin or delegate.
+        ...(a1 ? [] : require('./exaone-cli').jsonAccounts()),
+      ],
     }, null, 2));
     return;
   }
@@ -74,6 +80,7 @@ function cmdList() {
       console.log(`  ${p.active ? '*' : ' '} ${pad(shown(p), 14)} ${id}`);
     }
   }
+  if (!a1) require('./exaone-cli').printList();
 }
 
 function usageRows(t, p) {
@@ -181,32 +188,6 @@ function cmdLogin() {
   if (flags.has('--open')) require('./terminal').openLoginTerminal(t, home, name === 'default');
 }
 
-// Reads an API key from piped stdin, or from a hidden prompt on a TTY. Never from argv.
-async function readSecret(prompt) {
-  if (!process.stdin.isTTY) {
-    let data = '';
-    process.stdin.setEncoding('utf8');
-    for await (const chunk of process.stdin) { data += chunk; if (data.length > 4096) throw new Error('입력이 너무 깁니다'); }
-    return data;
-  }
-  return new Promise((resolve, reject) => {
-    process.stderr.write(prompt);
-    const stdin = process.stdin;
-    let value = '';
-    stdin.setRawMode(true); stdin.resume(); stdin.setEncoding('utf8');
-    const done = (err) => { stdin.setRawMode(false); stdin.pause(); stdin.removeListener('data', onData); process.stderr.write('\n'); err ? reject(err) : resolve(value); };
-    const onData = (s) => {
-      for (const ch of s) {
-        if (ch === '\r' || ch === '\n' || ch === '\u0004') return done();
-        if (ch === '\u0003') return done(new Error('취소됨'));
-        if (ch === '\u007f' || ch === '\b') value = value.slice(0, -1);
-        else if (ch >= ' ') value += ch;
-      }
-    };
-    stdin.on('data', onData);
-  });
-}
-
 async function setApiKey(t, name) {
   const keys = require('./api-keys');
   const id = store.resolve(t, name);
@@ -252,6 +233,7 @@ async function cmdApiKey() {
       rows.push({ tool: t, profileId: id, label: store.label(st, t, id), ...info });
     }
   }
+  if (ts === TOOLS) rows.push(...require('./exaone').snapshot().accounts.map(a => ({ tool: 'exaone', profileId: a.name, label: a.label, apiKey: Boolean(a.apiKey && a.apiKey.apiKey), masked: a.apiKey ? a.apiKey.masked : null })));
   if (flags.has('--json')) { console.log(JSON.stringify(rows, null, 2)); return; }
   for (const r of rows) console.log(`${pad(r.tool, 7)} ${pad(r.label !== r.profileId ? `${r.label} (${r.profileId})` : r.profileId, 20)} ${r.apiKey ? `API 키${r.masked ? ' ' + r.masked : ''}` : '-'}`);
 }
@@ -290,6 +272,8 @@ function help() {
   도구: claude | codex
   antigravity (또는 agy) list|check|usage|save <name>|use <name> --shared-login|remove <name>|recover
                                           Antigravity 공용 로그인 저장·전환 (격리 실행 미지원)
+  exaone list|add <name> [--with-api-key]|rm <name>|use <name>|rename <name> <new>|apikey set|rm <name>|check [name]|env [name]|run [name] -- <command...>
+                                          EXAONE API(LG AI연구원) 키 계정 · OpenAI 호환 명령에 키 주입 실행 (위임 미지원)
   delegate <tool> --profile <id> [--context task.json] -- <args...> 작업별 위임 (프로필 필수, 전역 전환 금지)
   run <tool> [--profile <id>] -- <args...>  활성 계정 변경 없이 고정 실행
   dashboard [--port N] [--public-origin URL] 로컬 웹 작업 관리
@@ -315,6 +299,14 @@ ${edition.directUsageApi ? '  api   [on|off] | interval <분>           서버 �
 
 (async () => {
   try {
+    if (argv[0] === 'exaone') { await require('./exaone-cli').run(argv.slice(1)); return; }
+    if (argv[1] === 'exaone' && ['list', 'ls', 'add', 'use', 'switch', 'rm', 'remove', 'rename', 'mv', 'run', 'exec', 'check', 'env', 'login'].includes(argv[0])) {
+      if (argv[0] === 'login') die('EXAONE는 로그인이 없습니다. API 키를 등록하세요: cli-accounts exaone apikey set <name>');
+      await require('./exaone-cli').run([argv[0], ...argv.slice(2)]); return;
+    }
+    if (argv[0] === 'apikey' && argv[2] === 'exaone') { await require('./exaone-cli').run(['apikey', argv[1], ...argv.slice(3)]); return; }
+    if (argv[0] === 'apikey' && argv[1] === 'exaone') { await require('./exaone-cli').run(['apikey', ...argv.slice(2)]); return; }
+    if (argv[0] === 'delegate' && argv[1] === 'exaone') die('EXAONE는 고정 CLI가 없어 위임 대상이 아닙니다. cli-accounts exaone run <name> -- <command> 로 실행하세요.');
     if (['antigravity', 'agy'].includes(argv[0])) { await require('./antigravity-cli').run(argv.slice(1)); return; }
     if (['antigravity', 'agy'].includes(argv[1]) && ['list', 'add', 'use', 'switch', 'rm', 'remove', 'login'].includes(argv[0])) {
       await require('./antigravity-cli').run([argv[0], ...argv.slice(2)]); return;

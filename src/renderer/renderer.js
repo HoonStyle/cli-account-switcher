@@ -60,8 +60,8 @@ function usageCell(tool, p) {
   const show = (pct) => Math.round(remaining ? Math.max(0, 100 - pct) : pct);
   const compact = state.density !== 'comfortable';
   const suffix = remaining && !compact ? ' 남음' : ''; // compact: mode is shown in the footer instead
-  const lines = ws.map((w) => `<div><span class="${cls(w.pct)}"><b class="num">${show(w.pct)}%</b>${suffix}</span> ${w.l}·<span class="num">${compact ? relShort(w.at) : rel(w.at)}</span></div>`).join('');
-  const note = ['claude', 'codex'].includes(tool) ? `<div class="muted">${err ? '이전 값 · 조회 실패 · ' : ''}${esc(age(p.usage.capturedAt))}</div>` : '';
+  const lines = ws.map((w) => `<div class="usage-window ${cls(w.pct)}"><span class="window-label">${esc(w.l)}</span><span class="window-value num">${show(w.pct)}%${suffix}</span><span class="reset-time num">${compact ? relShort(w.at) : rel(w.at)}</span><span class="usage-track" aria-hidden="true"><span class="usage-fill" style="width:${Math.min(100,Math.max(0,show(w.pct)))}%"></span></span></div>`).join('');
+  const note = ['claude', 'codex'].includes(tool) ? `<div class="usage-note">${err ? '이전 값 · 조회 실패 · ' : ''}${esc(age(p.usage.capturedAt))}</div>` : '';
   return `<div class="usage" title="${remaining ? '남은 한도' : '사용률'} · 리셋까지 남은 시간 (${src}, ${age(p.usage.capturedAt)})${err ? ' · API 조회 실패: ' + esc(err) : ''}">${lines}${note}</div>`;
 }
 
@@ -104,7 +104,9 @@ function row(tool, p, active) {
 function render() {
   if (!state) return;
   document.body.classList.toggle('compact', state.density !== 'comfortable');
+  $('#account-count').textContent = (TOOLS.reduce((n, tool) => n + (state.tools[tool]?.profiles.length || 0), 0) + (state.antigravity?.accounts.length || 0) + (state.exaone?.accounts.length || 0)) + '개 계정';
   renderAntigravity();
+  renderExaone();
   for (const tool of TOOLS) {
     const t = state.tools[tool];
     const list = $(`#${tool} .list`);
@@ -151,6 +153,52 @@ function render() {
   const modeNote = state.usageMode === 'remaining' ? '남은 비율 · ' : '';
   $('#hookText').textContent = modeNote + (srcs.length ? `출처: 세션 기록 · ${srcs.join(' · ')}` : '출처: 세션 기록만');
   fit();
+}
+
+// Short form for the row; the full text (with rate-limit counts) goes into the row title.
+function exaoneCheckLine(c, full = false) {
+  if (!c) return '연결 미확인';
+  const when = new Date(c.checkedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+  if (!c.ok) return `연결 실패 ${when} · ${c.error}`;
+  const m = c.rateLimit?.minute, d = c.rateLimit?.day;
+  const rate = [m && m.remaining != null ? `분 ${m.remaining}/${m.limit ?? '?'}` : null, d && d.remaining != null ? `일 ${d.remaining}/${d.limit ?? '?'}` : null].filter(Boolean).join(' · ');
+  return `연결 확인 ${when}${full && rate ? ' · 남은 호출 ' + rate : ''}`;
+}
+// EXAONE API accounts: API-key category (no login, no CLI home). The key never reaches the renderer.
+function renderExaone() {
+  const ex = state.exaone || { accounts: [] };
+  const list = $('#exaone .list');
+  list.innerHTML = ex.accounts.length ? ex.accounts.map((a) => {
+    const on = a.active;
+    const keyed = Boolean(a.apiKey?.apiKey);
+    const shown = a.label || a.name;
+    return `<div class="row" role="radio" tabindex="0" aria-checked="${on}" data-name="${esc(a.name)}" aria-label="${esc(shown)} ${on ? '사용 중' : '전환'}">
+    <span class="check">${ICON.check}</span>
+    <div class="id"><div class="name"><span class="label" title="${esc(a.name !== shown ? 'ID: ' + a.name : '')}">${esc(shown)}</span></div><div class="email" title="${esc(keyed ? exaoneCheckLine(a.check, true) : 'API 키를 등록하면 연결 확인과 실행을 쓸 수 있습니다')}">${keyed ? `API 키${a.apiKey.masked ? ' ' + esc(a.apiKey.masked) : ''} · ${esc(exaoneCheckLine(a.check, state.density === 'comfortable'))}` : 'API 키 필요'}</div></div>
+    ${keyed ? '' : '<span class="login-actions"><button class="btn small keyset" title="EXAONE API 키 등록">API 키</button></span>'}
+    <button class="iconbtn more" aria-label="${esc(a.name)} 더 보기" aria-haspopup="menu" aria-expanded="false">${ICON.more}</button>
+  </div>`;
+  }).join('') : '<p class="hint">계정이 없습니다. 계정을 추가한 뒤 API 키를 등록하세요.</p>';
+  for (const el of list.querySelectorAll('.row')) {
+    const name = el.dataset.name;
+    const a = ex.accounts.find((x) => x.name === name);
+    const sw = () => { if (el.getAttribute('aria-checked') !== 'true') run(() => api.exaone('setActive', name), `exaone → ${a.label || name}`); };
+    el.onclick = (e) => { if (!e.target.closest('button, input, form')) sw(); };
+    el.onkeydown = (e) => { if (e.target === el && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); sw(); } };
+    const keyset = el.querySelector('.keyset'); if (keyset) keyset.onclick = () => startKeyEntry(el, 'exaone', name);
+    el.querySelector('.more').onclick = (e) => openMenu(e.currentTarget, [
+      { label: a.apiKey?.apiKey ? 'API 키 변경…' : 'API 키 등록…', title: '실행 시 EXAONE_API_KEY·OPENAI_API_KEY로 주입합니다 (API 사용량 과금)', act: () => startKeyEntry(el, 'exaone', name) },
+      ...(a.apiKey?.apiKey ? [
+        { label: '연결 확인 (GET /v1/models)', act: () => runMsg(() => api.exaone('check', name)) },
+        { label: 'API 키 제거', act: () => runMsg(() => api.exaone('removeKey', name)) },
+      ] : []),
+      { label: '실행 명령 복사', title: 'cli-accounts exaone run <계정> -- <명령>', act: () => run(() => api.copy(`cli-accounts exaone run ${name} -- `), '복사됨 · 뒤에 실행할 명령을 붙이세요') },
+      { label: 'API 문서 열기', act: () => api.exaone('openDocs') },
+      { label: '이름 변경', act: () => startRename(el, 'exaone', name, a.label || name, (v) => api.exaone('rename', name, v)) },
+      { hr: true },
+      { label: '제거…', danger: true, act: () => run(() => api.exaone('remove', name), '') },
+    ]);
+  }
 }
 
 function renderAntigravity() {
@@ -204,7 +252,7 @@ function fit() {
 }
 
 // Inline rename: swap the label for an input; Enter saves, Esc/blur cancels.
-function startRename(rowEl, tool, name, current) {
+function startRename(rowEl, tool, name, current, doRename = (v) => api.rename(tool, name, v)) {
   const span = rowEl.querySelector('.label');
   const input = document.createElement('input');
   input.className = 'rename'; input.value = current; input.setAttribute('aria-label', '새 이름');
@@ -213,7 +261,7 @@ function startRename(rowEl, tool, name, current) {
   const finish = async (save) => {
     if (done) return; done = true;
     const v = input.value.trim();
-    if (save && v && v !== current) await run(() => api.rename(tool, name, v), `${current} → ${v}`);
+    if (save && v && v !== current) await run(() => doRename(v), `${current} → ${v}`);
     else { state = await api.state(); render(); }
   };
   input.onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') finish(true); else if (e.key === 'Escape') finish(false); };
@@ -241,7 +289,7 @@ function startKeyEntry(rowEl, tool, name) {
   rowEl.querySelector('.keyentry')?.remove();
   const form = document.createElement('form');
   form.className = 'keyentry';
-  const hint = tool === 'claude' ? 'sk-ant-… (이 프로필 실행 시 ANTHROPIC_API_KEY로 사용)' : 'sk-… (공식 codex login --with-api-key)';
+  const hint = tool === 'claude' ? 'sk-ant-… (이 프로필 실행 시 ANTHROPIC_API_KEY로 사용)' : tool === 'exaone' ? 'sk-… (실행 시 EXAONE_API_KEY·OPENAI_API_KEY로 주입)' : 'sk-… (공식 codex login --with-api-key)';
   form.innerHTML = `<input type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="${esc(name)} API 키" placeholder="${esc(hint)}"><button type="submit" class="btn small primary">저장</button><button type="button" class="btn small cancel">취소</button>`;
   rowEl.appendChild(form); fit();
   const input = form.querySelector('input');
@@ -252,7 +300,7 @@ function startKeyEntry(rowEl, tool, name) {
   form.onsubmit = (e) => {
     e.preventDefault(); const key = input.value.trim(); if (!key) return;
     input.value = ''; form.querySelectorAll('input, button').forEach((x) => { x.disabled = true; });
-    runMsg(() => api.setApiKey(tool, name, key));
+    runMsg(() => (tool === 'exaone' ? api.exaone('setKey', name, key) : api.setApiKey(tool, name, key)));
   };
   input.focus();
 }
@@ -297,7 +345,7 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { if (menu
 
 let msgTimer = null;
 function say(text, err) {
-  const m = $('#msg'); m.textContent = text || ''; m.style.color = err ? '#f87171' : '';
+  const m = $('#msg'); m.textContent = text || ''; m.style.color = err ? 'var(--danger)' : '';
   clearTimeout(msgTimer); if (text) msgTimer = setTimeout(() => { m.textContent = ''; }, 4000);
 }
 async function run(fn, okMsg) {
@@ -334,6 +382,23 @@ for (const tool of TOOLS) {
   };
 }
 
+// EXAONE: add an account, then open the key entry for it. No folder/login step.
+{
+  const add = $('#exaone .addrow'); const input = add.querySelector('input');
+  const reset = () => { add.classList.remove('open'); input.value = ''; fit(); };
+  add.querySelector('.link').onclick = () => { add.classList.add('open'); input.focus(); fit(); };
+  add.querySelector('.cancel').onclick = reset;
+  add.querySelector('form').onsubmit = (e) => {
+    e.preventDefault(); const v = input.value.trim(); if (!v) return;
+    let id = null;
+    run(async () => { id = (await api.exaone('add', v)).id; }, `${v} 추가됨 · API 키를 입력하세요`).then(() => {
+      reset();
+      const el = id && [...document.querySelectorAll('#exaone .row')].find((r) => r.dataset.name === id);
+      if (el) startKeyEntry(el, 'exaone', id);
+    });
+  };
+}
+
 const CHECK = (on) => (on ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l5 5L20 7"/></svg>' : '<svg viewBox="0 0 24 24" aria-hidden="true"></svg>');
 $('#settingsBtn').onclick = (e) => openMenu(e.currentTarget, [
   { html: CHECK(state?.usageHook) + 'Claude 사용량 수집 (statusline)', act: () => run(() => api.usageHook(!state.usageHook), state?.usageHook ? '수집을 껐습니다' : '다음 Claude 응답부터 기록됩니다') },
@@ -343,8 +408,8 @@ $('#settingsBtn').onclick = (e) => openMenu(e.currentTarget, [
   { html: CHECK(state?.usageMode !== 'remaining') + '사용한 비율로 표시', act: () => run(() => api.setUsageMode('used'), '') },
   { html: CHECK(state?.usageMode === 'remaining') + '남은 비율로 표시', act: () => run(() => api.setUsageMode('remaining'), '') },
   { hr: true },
-  { html: CHECK(state?.density !== 'comfortable') + '촘촘하게 (한 줄)', act: () => run(() => api.setDensity('compact'), '') },
-  { html: CHECK(state?.density === 'comfortable') + '넉넉하게 (두 줄)', act: () => run(() => api.setDensity('comfortable'), '') },
+  { html: CHECK(state?.density !== 'comfortable') + '간결하게', act: () => run(() => api.setDensity('compact'), '') },
+  { html: CHECK(state?.density === 'comfortable') + '여유 있게', act: () => run(() => api.setDensity('comfortable'), '') },
   { hr: true },
   ...(state?.zooms || [1, 1.1, 1.25, 1.5]).map((z) => ({ html: CHECK(state?.zoom === z) + `글자 크기 ${Math.round(z * 100)}%`, act: () => run(() => api.setZoom(z), '') })),
   { hr: true },
@@ -369,6 +434,8 @@ async function refreshNow() {
   } finally { refreshing = false; btn.classList.remove('spin'); btn.disabled = false; }
 }
 $('#refreshBtn').onclick = refreshNow;
+$('#workspaceBtn').hidden = !api.openTasks;
+$('#workspaceBtn').onclick = () => run(() => api.openTasks(), '');
 document.addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'r') { e.preventDefault(); refreshNow(); } });
 
 api.onState((s) => { state = s; render(); });

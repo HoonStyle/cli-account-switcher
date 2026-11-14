@@ -7,6 +7,8 @@ const EMPTY = () => ({
   version: 1,
   claude: { active: 'default', profiles: ['default'] },
   codex: { active: 'default', profiles: ['default'] },
+  // API-key provider category (exaone.js): no default account, no profile homes.
+  exaone: { active: null, profiles: [] },
   realBin: {},
   statusLineOriginal: null,
   apiFetch: false, // optional server-side usage lookup
@@ -27,7 +29,7 @@ function load() {
     const s = JSON.parse(fs.readFileSync(P.STATE_FILE, 'utf8'));
     const base = EMPTY();
     const merged = { ...base, ...s };
-    for (const t of P.TOOLS) merged[t] = { ...base[t], ...(s[t] || {}) };
+    for (const t of [...P.TOOLS, ...(P.PROVIDERS || [])]) merged[t] = { ...base[t], ...(s[t] || {}) };
     return merged;
   } catch {
     return EMPTY();
@@ -62,6 +64,52 @@ function profileHome(tool, name) {
   return path.join(P.PROFILES_DIR[tool], name);
 }
 
+// Codex reconciles these plugin paths against each account's own ChatGPT install list and
+// deletes entries that list lacks. Shared across accounts, they make accounts remove and
+// reinstall each other's connector plugins every few minutes, which also changes the skill
+// list in Codex instructions and re-injects the whole instruction block into long threads.
+// Keep them per profile; everything else under plugins/ stays linked to the default home.
+const CODEX_PER_PROFILE_PLUGIN_PATHS = ['.remote-plugin-install-staging', path.join('cache', 'openai-curated-remote')];
+
+function linkDir(from, to) {
+  fs.symlinkSync(from, to, P.IS_WIN ? 'junction' : undefined);
+}
+
+// Build (or top up) a real plugins/ directory whose shared entries link to `srcPlugins` and
+// whose per-profile paths are real directories. Idempotent: existing entries are left alone.
+function linkCodexPlugins(srcPlugins, dstPlugins) {
+  const linked = [];
+  if (fs.existsSync(dstPlugins) && fs.lstatSync(dstPlugins).isSymbolicLink()) return linked;
+  fs.mkdirSync(dstPlugins, { recursive: true, mode: 0o700 });
+  const perProfile = new Set(CODEX_PER_PROFILE_PLUGIN_PATHS);
+  const walk = (rel) => {
+    const src = path.join(srcPlugins, rel);
+    for (const entry of fs.readdirSync(src)) {
+      const childRel = rel ? path.join(rel, entry) : entry;
+      if (perProfile.has(childRel)) continue;
+      const to = path.join(dstPlugins, childRel);
+      // Descend into a parent of a per-profile path; link everything else whole.
+      if (CODEX_PER_PROFILE_PLUGIN_PATHS.some((p) => p.startsWith(childRel + path.sep))) {
+        fs.mkdirSync(to, { recursive: true, mode: 0o700 });
+        walk(childRel);
+        continue;
+      }
+      if (fs.existsSync(to) || isLink(to)) continue;
+      const from = path.join(srcPlugins, childRel);
+      if (fs.statSync(from).isDirectory()) linkDir(from, to);
+      else fs.symlinkSync(from, to);
+      linked.push(path.join('plugins', childRel));
+    }
+  };
+  if (fs.existsSync(srcPlugins)) walk('');
+  for (const rel of CODEX_PER_PROFILE_PLUGIN_PATHS) fs.mkdirSync(path.join(dstPlugins, rel), { recursive: true, mode: 0o700 });
+  return linked;
+}
+
+function isLink(p) {
+  try { return fs.lstatSync(p).isSymbolicLink(); } catch { return false; }
+}
+
 function linkShared(tool, home) {
   const src = P.configDir(tool, P.DEFAULT_HOME[tool]);
   const dst = P.configDir(tool, home);
@@ -70,6 +118,10 @@ function linkShared(tool, home) {
   for (const item of P.SHARE_ALLOWLIST[tool]) {
     const from = path.join(src, item);
     const to = path.join(dst, item);
+    if (tool === 'codex' && item === 'plugins') {
+      if (fs.existsSync(from) && !fs.existsSync(to)) linked.push(...linkCodexPlugins(from, to));
+      continue;
+    }
     if (!fs.existsSync(from) || fs.existsSync(to)) continue;
     const isDir = fs.statSync(from).isDirectory();
     try {
@@ -159,4 +211,4 @@ function setActive(tool, name) {
   return state;
 }
 
-module.exports = { load, save, validName, profileHome, addProfile, removeProfile, setActive, setSetting, label, resolve, rename };
+module.exports = { load, save, validName, profileHome, addProfile, removeProfile, setActive, setSetting, label, resolve, rename, linkCodexPlugins, CODEX_PER_PROFILE_PLUGIN_PATHS };

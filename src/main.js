@@ -13,6 +13,7 @@ const { modelCatalog } = require('./model-catalog');
 const edition = require('./edition.json');
 const INSPECT = { claude: claude.inspect, codex: codex.inspect };
 const antigravity = require('./antigravity').manager();
+const exaone = require('./exaone');
 let win = null;
 let tray = null;
 let tasksWin = null;
@@ -84,6 +85,7 @@ function snapshot() {
     };
   }
   out.antigravity = antigravity.snapshot();
+  out.exaone = exaone.snapshot(state);
   return out;
 }
 
@@ -285,6 +287,37 @@ ipcMain.handle('antigravity', async (_e, action, value) => {
     if (answer.response !== 1) return { cancelled: true };
   }
   const result = await antigravity[action](value); refresh(); return result;
+});
+ipcMain.handle('exaone', async (_e, action, value, extra) => {
+  if (!['add', 'remove', 'setActive', 'rename', 'setKey', 'removeKey', 'check', 'openDocs'].includes(action)) throw Error('Unsupported EXAONE action');
+  if (action === 'openDocs') { await shell.openExternal(exaone.DOCS); return true; }
+  if (action === 'remove') {
+    // A modal dialog steals focus; keep the panel open while it is up.
+    const id = exaone.resolve(value);
+    win.removeAllListeners('blur');
+    const { response } = await dialog.showMessageBox(win, {
+      type: 'warning', buttons: ['제거', '취소'], defaultId: 0, cancelId: 1,
+      message: `EXAONE 계정 "${exaone.label(store.load(), id)}" 제거`, detail: '등록된 API 키 파일도 함께 삭제됩니다.',
+    });
+    win.on('blur', () => { if (!win.webContents.isDevToolsOpened()) win.hide(); });
+    if (response !== 0) return false;
+    exaone.remove(id); refresh(); return true;
+  }
+  if (action === 'setKey') {
+    const r = exaone.setKey(value, typeof extra === 'string' ? extra : '');
+    refresh();
+    return `${exaone.label(store.load(), r.id)}: API 키 등록됨 (${r.masked})${r.warning ? ' · ' + r.warning : ''}`;
+  }
+  if (action === 'removeKey') { const r = exaone.removeKey(value); refresh(); return `${exaone.label(store.load(), r.id)}: ${r.removed ? 'API 키 제거됨' : '등록된 API 키 없음'}`; }
+  if (action === 'check') {
+    const r = await exaone.check(value); refresh();
+    if (!r.ok) throw new Error(`연결 실패: ${r.error}`);
+    const minute = r.rateLimit && r.rateLimit.minute;
+    const rate = minute && minute.remaining != null ? ` · 분 남은 호출 ${minute.remaining}/${minute.limit ?? '?'}` : '';
+    return `${exaone.label(store.load(), r.id)}: 연결 확인 완료${r.models.length ? ' · ' + r.models.join(', ') : ''}${rate}`;
+  }
+  if (action === 'rename') { const r = exaone.rename(value, extra); refresh(); return r; }
+  const r = exaone[action](value); refresh(); return r;
 });
 ipcMain.handle('setActive', (_e, tool, name) => { store.setActive(tool, name); refresh(); return snapshot(); });
 ipcMain.handle('addProfile', (_e, tool, name, opts) => { const r = store.addProfile(tool, name, opts); refresh(); return r; });

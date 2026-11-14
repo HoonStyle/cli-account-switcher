@@ -127,7 +127,7 @@ function installShims() {
   // Self-contained copy of the modules the console CLI needs, so it works without the app running.
   fs.mkdirSync(P.LIB_DIR, { recursive: true });
   const edition = require('./edition.json');
-  const modules = ['edition.json', 'paths.js', 'store.js', 'claude.js', 'codex.js', 'codex-reset-credits.js', 'model-catalog.js', 'project-folders.js', 'official-auth.js', 'terminal.js', 'wrappers.js', 'cli.js', 'api-keys.js', 'antigravity.js', 'antigravity-cli.js', 'antigravity-usage.js'];
+  const modules = ['edition.json', 'paths.js', 'store.js', 'claude.js', 'codex.js', 'codex-reset-credits.js', 'model-catalog.js', 'project-folders.js', 'official-auth.js', 'terminal.js', 'wrappers.js', 'cli.js', 'api-keys.js', 'exaone.js', 'exaone-cli.js', 'secret-input.js', 'antigravity.js', 'antigravity-cli.js', 'antigravity-usage.js'];
   if (edition.credentialMetadata) modules.push('claude-cred.js', 'codex-identity.js');
   if (edition.directUsageApi) modules.push('usage-api.js', 'gemini.js');
   for (const f of modules) {

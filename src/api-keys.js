@@ -2,6 +2,8 @@
 // Per-profile API keys, kept separate from subscription logins.
 //   claude: stored here (0600 file under <ROOT>/api-keys/claude/<profileId>) and injected
 //           as ANTHROPIC_API_KEY only into processes launched for that exact profile.
+//   exaone: stored the same way under <ROOT>/api-keys/exaone/<profileId>; exaone.js injects
+//           it as EXAONE_API_KEY / OPENAI_API_KEY into commands run for that account.
 //   codex:  handed to the official `codex login --with-api-key` (stdin) with that profile's
 //           CODEX_HOME, so Codex keeps it in its own credential store. Nothing is stored here.
 // Keys are never accepted on argv and never printed.
@@ -10,12 +12,14 @@ const path = require('path');
 const P = require('./paths');
 
 const DIR = path.join(P.ROOT, 'api-keys');
+// Tools whose keys this module stores itself (file-backed).
+const FILE_TOOLS = new Set(['claude', 'exaone']);
 
 function validId(id) {
   return typeof id === 'string' && /^[\p{L}\p{N}][\p{L}\p{N} ._-]{0,40}$/u.test(id) && !/[\\/:*?"<>|]/.test(id) && id.trim() === id;
 }
 function keyFile(tool, profileId) {
-  if (tool !== 'claude') throw new Error(`API 키 파일은 claude 전용입니다: ${tool}`);
+  if (!FILE_TOOLS.has(tool)) throw new Error(`API 키 파일은 claude·exaone 전용입니다: ${tool}`);
   if (!validId(profileId)) throw new Error('Invalid profile ID');
   return path.join(DIR, tool, profileId);
 }
@@ -31,7 +35,7 @@ function normalize(raw) {
 function mask(key) { return key ? `…${key.slice(-4)}` : null; }
 
 function read(tool, profileId) {
-  if (tool !== 'claude' || !validId(profileId)) return null;
+  if (!FILE_TOOLS.has(tool) || !validId(profileId)) return null;
   try { return fs.readFileSync(keyFile(tool, profileId), 'utf8').trim() || null; } catch { return null; }
 }
 
@@ -47,7 +51,7 @@ function write(tool, profileId, raw) {
 }
 
 function remove(tool, profileId) {
-  if (tool !== 'claude' || !validId(profileId)) return false;
+  if (!FILE_TOOLS.has(tool) || !validId(profileId)) return false;
   try { fs.unlinkSync(keyFile(tool, profileId)); return true; } catch { return false; }
 }
 
@@ -70,6 +74,10 @@ function register(tool, profileId, raw, { stdio = 'pipe' } = {}) {
     const r = write('claude', profileId, key);
     return { masked: r.masked, warning: /^sk-ant-/.test(key) ? null : 'Anthropic API 키는 보통 sk-ant- 로 시작합니다' };
   }
+  if (tool === 'exaone') {
+    const r = write('exaone', profileId, key);
+    return { masked: r.masked, warning: /^sk-/.test(key) ? null : 'EXAONE API 키는 보통 sk- 로 시작합니다' };
+  }
   if (tool !== 'codex') throw new Error(`Unsupported tool: ${tool}`);
   const { resolveProfile, launchEnv } = require('./launch/profile-resolver');
   const binding = resolveProfile('codex', profileId);
@@ -83,7 +91,7 @@ function register(tool, profileId, raw, { stdio = 'pipe' } = {}) {
 
 // Remove a key. Codex is logged out only when it is in API-key mode.
 function unregister(tool, profileId, { stdio = 'pipe' } = {}) {
-  if (tool === 'claude') return { removed: remove('claude', profileId) };
+  if (FILE_TOOLS.has(tool)) return { removed: remove(tool, profileId) };
   if (tool !== 'codex') throw new Error(`Unsupported tool: ${tool}`);
   const { resolveProfile, launchEnv } = require('./launch/profile-resolver');
   const binding = resolveProfile('codex', profileId);
