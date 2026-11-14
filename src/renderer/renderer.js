@@ -1,6 +1,8 @@
 'use strict';
 const $ = (s, r = document) => r.querySelector(s);
 const TOOLS = ['claude', 'codex'];
+// API-key provider categories; each has a <section id="<id>"> and a state[<id>] snapshot.
+const PROVIDERS = ['exaone', 'gemini-api'];
 let state = null;
 
 const ICON = {
@@ -104,9 +106,9 @@ function row(tool, p, active) {
 function render() {
   if (!state) return;
   document.body.classList.toggle('compact', state.density !== 'comfortable');
-  $('#account-count').textContent = (TOOLS.reduce((n, tool) => n + (state.tools[tool]?.profiles.length || 0), 0) + (state.antigravity?.accounts.length || 0) + (state.exaone?.accounts.length || 0)) + '개 계정';
+  $('#account-count').textContent = (TOOLS.reduce((n, tool) => n + (state.tools[tool]?.profiles.length || 0), 0) + (state.antigravity?.accounts.length || 0) + PROVIDERS.reduce((n, id) => n + (state[id]?.accounts.length || 0), 0)) + '개 계정';
   renderAntigravity();
-  renderExaone();
+  for (const id of PROVIDERS) renderProvider(id);
   for (const tool of TOOLS) {
     const t = state.tools[tool];
     const list = $(`#${tool} .list`);
@@ -164,10 +166,12 @@ function exaoneCheckLine(c, full = false) {
   const rate = [m && m.remaining != null ? `분 ${m.remaining}/${m.limit ?? '?'}` : null, d && d.remaining != null ? `일 ${d.remaining}/${d.limit ?? '?'}` : null].filter(Boolean).join(' · ');
   return `연결 확인 ${when}${full && rate ? ' · 남은 호출 ' + rate : ''}`;
 }
-// EXAONE API accounts: API-key category (no login, no CLI home). The key never reaches the renderer.
-function renderExaone() {
-  const ex = state.exaone || { accounts: [] };
-  const list = $('#exaone .list');
+// API-key provider accounts (exaone, gemini-api): no login, no CLI home. The key never reaches the renderer.
+function renderProvider(id) {
+  const ex = state[id] || { accounts: [], envNames: [] };
+  const keyVars = (ex.envNames || []).filter((n) => /_API_KEY$/.test(n)).join('·');
+  const list = $(`#${id} .list`);
+  if (!list) return;
   list.innerHTML = ex.accounts.length ? ex.accounts.map((a) => {
     const on = a.active;
     const keyed = Boolean(a.apiKey?.apiKey);
@@ -175,28 +179,28 @@ function renderExaone() {
     return `<div class="row" role="radio" tabindex="0" aria-checked="${on}" data-name="${esc(a.name)}" aria-label="${esc(shown)} ${on ? '사용 중' : '전환'}">
     <span class="check">${ICON.check}</span>
     <div class="id"><div class="name"><span class="label" title="${esc(a.name !== shown ? 'ID: ' + a.name : '')}">${esc(shown)}</span></div><div class="email" title="${esc(keyed ? exaoneCheckLine(a.check, true) : 'API 키를 등록하면 연결 확인과 실행을 쓸 수 있습니다')}">${keyed ? `API 키${a.apiKey.masked ? ' ' + esc(a.apiKey.masked) : ''} · ${esc(exaoneCheckLine(a.check, state.density === 'comfortable'))}` : 'API 키 필요'}</div></div>
-    ${keyed ? '' : '<span class="login-actions"><button class="btn small keyset" title="EXAONE API 키 등록">API 키</button></span>'}
+    ${keyed ? '' : '<span class="login-actions"><button class="btn small keyset" title="${esc(ex.label || id)} API 키 등록">API 키</button></span>'}
     <button class="iconbtn more" aria-label="${esc(a.name)} 더 보기" aria-haspopup="menu" aria-expanded="false">${ICON.more}</button>
   </div>`;
   }).join('') : '<p class="hint">계정이 없습니다. 계정을 추가한 뒤 API 키를 등록하세요.</p>';
   for (const el of list.querySelectorAll('.row')) {
     const name = el.dataset.name;
     const a = ex.accounts.find((x) => x.name === name);
-    const sw = () => { if (el.getAttribute('aria-checked') !== 'true') run(() => api.exaone('setActive', name), `exaone → ${a.label || name}`); };
+    const sw = () => { if (el.getAttribute('aria-checked') !== 'true') run(() => api.provider(id, 'setActive', name), `${id} → ${a.label || name}`); };
     el.onclick = (e) => { if (!e.target.closest('button, input, form')) sw(); };
     el.onkeydown = (e) => { if (e.target === el && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); sw(); } };
-    const keyset = el.querySelector('.keyset'); if (keyset) keyset.onclick = () => startKeyEntry(el, 'exaone', name);
+    const keyset = el.querySelector('.keyset'); if (keyset) keyset.onclick = () => startKeyEntry(el, id, name);
     el.querySelector('.more').onclick = (e) => openMenu(e.currentTarget, [
-      { label: a.apiKey?.apiKey ? 'API 키 변경…' : 'API 키 등록…', title: '실행 시 EXAONE_API_KEY·OPENAI_API_KEY로 주입합니다 (API 사용량 과금)', act: () => startKeyEntry(el, 'exaone', name) },
+      { label: a.apiKey?.apiKey ? 'API 키 변경…' : 'API 키 등록…', title: `실행 시 ${keyVars}로 주입합니다 (API 사용량 과금)`, act: () => startKeyEntry(el, id, name) },
       ...(a.apiKey?.apiKey ? [
-        { label: '연결 확인 (GET /v1/models)', act: () => runMsg(() => api.exaone('check', name)) },
-        { label: 'API 키 제거', act: () => runMsg(() => api.exaone('removeKey', name)) },
+        { label: `연결 확인 (${ex.checkPath || '모델 목록'})`, act: () => runMsg(() => api.provider(id, 'check', name)) },
+        { label: 'API 키 제거', act: () => runMsg(() => api.provider(id, 'removeKey', name)) },
       ] : []),
-      { label: '실행 명령 복사', title: 'cli-accounts exaone run <계정> -- <명령>', act: () => run(() => api.copy(`cli-accounts exaone run ${name} -- `), '복사됨 · 뒤에 실행할 명령을 붙이세요') },
-      { label: 'API 문서 열기', act: () => api.exaone('openDocs') },
-      { label: '이름 변경', act: () => startRename(el, 'exaone', name, a.label || name, (v) => api.exaone('rename', name, v)) },
+      { label: '실행 명령 복사', title: `cli-accounts ${id} run <계정> -- <명령>`, act: () => run(() => api.copy(`cli-accounts ${id} run ${name} -- `), '복사됨 · 뒤에 실행할 명령을 붙이세요') },
+      { label: 'API 문서 열기', act: () => api.provider(id, 'openDocs') },
+      { label: '이름 변경', act: () => startRename(el, id, name, a.label || name, (v) => api.provider(id, 'rename', name, v)) },
       { hr: true },
-      { label: '제거…', danger: true, act: () => run(() => api.exaone('remove', name), '') },
+      { label: '제거…', danger: true, act: () => run(() => api.provider(id, 'remove', name), '') },
     ]);
   }
 }
@@ -289,7 +293,8 @@ function startKeyEntry(rowEl, tool, name) {
   rowEl.querySelector('.keyentry')?.remove();
   const form = document.createElement('form');
   form.className = 'keyentry';
-  const hint = tool === 'claude' ? 'sk-ant-… (이 프로필 실행 시 ANTHROPIC_API_KEY로 사용)' : tool === 'exaone' ? 'sk-… (실행 시 EXAONE_API_KEY·OPENAI_API_KEY로 주입)' : 'sk-… (공식 codex login --with-api-key)';
+  const prov = PROVIDERS.includes(tool) ? (state[tool] || {}) : null;
+  const hint = tool === 'claude' ? 'sk-ant-… (이 프로필 실행 시 ANTHROPIC_API_KEY로 사용)' : prov ? `${prov.keyHint || ''} (실행 시 ${(prov.envNames || []).filter((n) => /_API_KEY$/.test(n)).join('·')}로 주입)` : 'sk-… (공식 codex login --with-api-key)';
   form.innerHTML = `<input type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="${esc(name)} API 키" placeholder="${esc(hint)}"><button type="submit" class="btn small primary">저장</button><button type="button" class="btn small cancel">취소</button>`;
   rowEl.appendChild(form); fit();
   const input = form.querySelector('input');
@@ -300,7 +305,7 @@ function startKeyEntry(rowEl, tool, name) {
   form.onsubmit = (e) => {
     e.preventDefault(); const key = input.value.trim(); if (!key) return;
     input.value = ''; form.querySelectorAll('input, button').forEach((x) => { x.disabled = true; });
-    runMsg(() => (tool === 'exaone' ? api.exaone('setKey', name, key) : api.setApiKey(tool, name, key)));
+    runMsg(() => (prov ? api.provider(tool, 'setKey', name, key) : api.setApiKey(tool, name, key)));
   };
   input.focus();
 }
@@ -382,19 +387,20 @@ for (const tool of TOOLS) {
   };
 }
 
-// EXAONE: add an account, then open the key entry for it. No folder/login step.
-{
-  const add = $('#exaone .addrow'); const input = add.querySelector('input');
+// API-key providers: add an account, then open the key entry for it. No folder/login step.
+for (const pid of PROVIDERS) {
+  const add = $(`#${pid} .addrow`); if (!add) continue;
+  const input = add.querySelector('input');
   const reset = () => { add.classList.remove('open'); input.value = ''; fit(); };
   add.querySelector('.link').onclick = () => { add.classList.add('open'); input.focus(); fit(); };
   add.querySelector('.cancel').onclick = reset;
   add.querySelector('form').onsubmit = (e) => {
     e.preventDefault(); const v = input.value.trim(); if (!v) return;
     let id = null;
-    run(async () => { id = (await api.exaone('add', v)).id; }, `${v} 추가됨 · API 키를 입력하세요`).then(() => {
+    run(async () => { id = (await api.provider(pid, 'add', v)).id; }, `${v} 추가됨 · API 키를 입력하세요`).then(() => {
       reset();
-      const el = id && [...document.querySelectorAll('#exaone .row')].find((r) => r.dataset.name === id);
-      if (el) startKeyEntry(el, 'exaone', id);
+      const el = id && [...document.querySelectorAll(`#${pid} .row`)].find((r) => r.dataset.name === id);
+      if (el) startKeyEntry(el, pid, id);
     });
   };
 }

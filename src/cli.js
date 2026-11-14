@@ -66,8 +66,8 @@ function cmdList() {
       execution: { command: 'delegate', profileRequired: true, changesActiveAccount: false, fallbackToActive: false },
       accounts: [
         ...ts.flatMap(t => state[t].profiles.map(profileId => ({ tool: t, profileId, active: state[t].active === profileId, ...(t === 'claude' ? { apiKey: require('./api-keys').status('claude', profileId).apiKey } : {}) }))),
-        // EXAONE accounts are listed for discovery only; they have no CLI to pin or delegate.
-        ...(a1 ? [] : require('./exaone-cli').jsonAccounts()),
+        // API-key provider accounts (exaone, gemini-api) are listed for discovery only; they have no CLI to pin or delegate.
+        ...(a1 ? [] : require('./providers').list.flatMap((p) => require('./provider-cli').forProvider(p).jsonAccounts())),
       ],
     }, null, 2));
     return;
@@ -80,7 +80,7 @@ function cmdList() {
       console.log(`  ${p.active ? '*' : ' '} ${pad(shown(p), 14)} ${id}`);
     }
   }
-  if (!a1) require('./exaone-cli').printList();
+  if (!a1) for (const p of require('./providers').list) require('./provider-cli').forProvider(p).printList();
 }
 
 function usageRows(t, p) {
@@ -233,7 +233,7 @@ async function cmdApiKey() {
       rows.push({ tool: t, profileId: id, label: store.label(st, t, id), ...info });
     }
   }
-  if (ts === TOOLS) rows.push(...require('./exaone').snapshot().accounts.map(a => ({ tool: 'exaone', profileId: a.name, label: a.label, apiKey: Boolean(a.apiKey && a.apiKey.apiKey), masked: a.apiKey ? a.apiKey.masked : null })));
+  if (ts === TOOLS) for (const p of require('./providers').list) rows.push(...p.snapshot().accounts.map(a => ({ tool: p.ID, profileId: a.name, label: a.label, apiKey: Boolean(a.apiKey && a.apiKey.apiKey), masked: a.apiKey ? a.apiKey.masked : null })));
   if (flags.has('--json')) { console.log(JSON.stringify(rows, null, 2)); return; }
   for (const r of rows) console.log(`${pad(r.tool, 7)} ${pad(r.label !== r.profileId ? `${r.label} (${r.profileId})` : r.profileId, 20)} ${r.apiKey ? `API 키${r.masked ? ' ' + r.masked : ''}` : '-'}`);
 }
@@ -274,6 +274,8 @@ function help() {
                                           Antigravity 공용 로그인 저장·전환 (격리 실행 미지원)
   exaone list|add <name> [--with-api-key]|rm <name>|use <name>|rename <name> <new>|apikey set|rm <name>|check [name]|env [name]|run [name] -- <command...>
                                           EXAONE API(LG AI연구원) 키 계정 · OpenAI 호환 명령에 키 주입 실행 (위임 미지원)
+  gemini-api (또는 gemini) list|add <name> [--with-api-key]|rm|use|rename|apikey set|rm|check|env|run [name] -- <command...>
+                                          Gemini API(Google AI Studio) 키 계정 · GEMINI_API_KEY·OpenAI 호환 변수 주입 실행 (위임 미지원)
   delegate <tool> --profile <id> [--context task.json] -- <args...> 작업별 위임 (프로필 필수, 전역 전환 금지)
   run <tool> [--profile <id>] -- <args...>  활성 계정 변경 없이 고정 실행
   dashboard [--port N] [--public-origin URL] 로컬 웹 작업 관리
@@ -299,14 +301,18 @@ ${edition.directUsageApi ? '  api   [on|off] | interval <분>           서버 �
 
 (async () => {
   try {
-    if (argv[0] === 'exaone') { await require('./exaone-cli').run(argv.slice(1)); return; }
-    if (argv[1] === 'exaone' && ['list', 'ls', 'add', 'use', 'switch', 'rm', 'remove', 'rename', 'mv', 'run', 'exec', 'check', 'env', 'login'].includes(argv[0])) {
-      if (argv[0] === 'login') die('EXAONE는 로그인이 없습니다. API 키를 등록하세요: cli-accounts exaone apikey set <name>');
-      await require('./exaone-cli').run([argv[0], ...argv.slice(2)]); return;
+    // API-key provider categories (exaone, gemini-api; aliases such as `gemini`).
+    const providers = require('./providers');
+    const providerCli = (p) => require('./provider-cli').forProvider(p);
+    const p0 = providers.find(argv[0]), p1 = providers.find(argv[1]), p2 = providers.find(argv[2]);
+    if (p0) { await providerCli(p0).run(argv.slice(1)); return; }
+    if (p1 && ['list', 'ls', 'add', 'use', 'switch', 'rm', 'remove', 'rename', 'mv', 'run', 'exec', 'check', 'env', 'login'].includes(argv[0])) {
+      if (argv[0] === 'login') die(`${p1.SHORT}는 로그인이 없습니다. API 키를 등록하세요: cli-accounts ${p1.ID} apikey set <name>`);
+      await providerCli(p1).run([argv[0], ...argv.slice(2)]); return;
     }
-    if (argv[0] === 'apikey' && argv[2] === 'exaone') { await require('./exaone-cli').run(['apikey', argv[1], ...argv.slice(3)]); return; }
-    if (argv[0] === 'apikey' && argv[1] === 'exaone') { await require('./exaone-cli').run(['apikey', ...argv.slice(2)]); return; }
-    if (argv[0] === 'delegate' && argv[1] === 'exaone') die('EXAONE는 고정 CLI가 없어 위임 대상이 아닙니다. cli-accounts exaone run <name> -- <command> 로 실행하세요.');
+    if (argv[0] === 'apikey' && p2) { await providerCli(p2).run(['apikey', argv[1], ...argv.slice(3)]); return; }
+    if (argv[0] === 'apikey' && p1) { await providerCli(p1).run(['apikey', ...argv.slice(2)]); return; }
+    if (argv[0] === 'delegate' && p1) die(`${p1.SHORT}는 고정 CLI가 없어 위임 대상이 아닙니다. cli-accounts ${p1.ID} run <name> -- <command> 로 실행하세요.`);
     if (['antigravity', 'agy'].includes(argv[0])) { await require('./antigravity-cli').run(argv.slice(1)); return; }
     if (['antigravity', 'agy'].includes(argv[1]) && ['list', 'add', 'use', 'switch', 'rm', 'remove', 'login'].includes(argv[0])) {
       await require('./antigravity-cli').run([argv[0], ...argv.slice(2)]); return;

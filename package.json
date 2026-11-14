@@ -1,12 +1,12 @@
 {
   "name": "cli-account-switch",
-  "version": "0.2.0-preview.17",
+  "version": "0.2.0-preview.18",
   "description": "Claude Code and Codex profiles, plus shared Antigravity login switching",
   "main": "src/main.js",
   "private": true,
   "scripts": {
     "start": "electron .",
-    "test": "node test/api-keys.js && node test/exaone.js && node test/antigravity.js && node test/antigravity-usage.js && node test/smoke.js && node test/codex-plugin-isolation.js && node test/distribution.js && node test/usage-hook.js && node test/reset-credit-auto-use.js && node test/login-terminal.js && node test/login-terminal-windows.js",
+    "test": "node test/api-keys.js && node test/exaone.js && node test/gemini-api.js && node test/antigravity.js && node test/antigravity-usage.js && node test/smoke.js && node test/codex-plugin-isolation.js && node test/distribution.js && node test/usage-hook.js && node test/reset-credit-auto-use.js && node test/login-terminal.js && node test/login-terminal-windows.js",
     "dist:mac": "electron-builder --mac --universal",
     "dist:win": "electron-builder --win",
     "test:runtime": "node test/runtime-context.js && node test/profile-launch.js && node test/delegation.js && node test/process-group.js && node test/delegation-lifecycle.js && node test/account-route.mjs && node test/runtime-artifacts.js && node test/runtime-recovery.js && node test/runtime-execution-policy.js && node test/runtime.js && node test/runtime-observation.js && node test/runtime-models.js && node test/runtime-output.js && node test/runtime-events.js && node test/runtime-query-contracts.js && node test/runtime-query-client.js && node test/runtime-state-contracts.js && node test/runtime-transport-contracts.js && node test/runtime-faults.js && node test/runtime-parent-exit.js && node test/runtime-service.js && node test/runtime-review-contracts.js && node test/openclaw-bridge.js && node test/openclaw-basics.js && node test/openclaw-query.js && node test/rpc-unicode.js && node test/openclaw-service.js",

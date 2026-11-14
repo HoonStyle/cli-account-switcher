@@ -42,6 +42,12 @@ body.compact .row{padding:8px 10px;gap:4px 8px}body.compact .row .id{display:fle
       <div class="addrow"><button class="link"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>계정 추가</button>
         <form><input placeholder="계정 이름 (예: exaone, 회사)" maxlength="41" autocomplete="off" spellcheck="false"><button type="submit" class="btn primary">추가 후 API 키 입력</button><button type="button" class="btn cancel">취소</button></form></div>
     </section>
+    <section id="gemini-api"><h2>Gemini API</h2>
+      <p class="hint">Google AI Studio API 키 계정 · GEMINI_API_KEY와 OpenAI 호환 변수를 주입해 실행 (개인 Gemini CLI 로그인은 Antigravity로 이전)</p>
+      <div class="list" role="radiogroup" aria-label="Gemini API 계정"></div>
+      <div class="addrow"><button class="link"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>계정 추가</button>
+        <form><input placeholder="계정 이름 (예: gemini, 개인)" maxlength="41" autocomplete="off" spellcheck="false"><button type="submit" class="btn primary">추가 후 API 키 입력</button><button type="button" class="btn cancel">취소</button></form></div>
+    </section>
     <section id="antigravity"><h2>Antigravity</h2>
       <p class="hint">앱·IDE·CLI 공용 로그인 · 전환 전 모두 종료</p>
       <p class="hint" id="agy-current">현재 로그인 미확인</p>

@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('api', {
   state: () => ipcRenderer.invoke('state'),
   antigravity: (action, value) => ipcRenderer.invoke('antigravity', action, value),
   exaone: (action, value, extra) => ipcRenderer.invoke('exaone', action, value, extra),
+  provider: (id, action, value, extra) => ipcRenderer.invoke('provider', id, action, value, extra),
   openTasks: () => ipcRenderer.invoke('openTasks'),
   tasksAck: (id, version) => ipcRenderer.invoke('tasksAck', id, version),
   tasksStart: () => ipcRenderer.invoke('tasksStart'),

@@ -20,7 +20,7 @@ Local profiles · CLI launches · Usage records · Managed tasks
 
 CLI Account Switch is an Electron desktop app for managing multiple local Claude Code and Codex CLI profiles. It separates configuration homes and launches each official CLI with the selected profile. The official CLIs handle sign-in and model requests.
 
-> **Preview** — Current version: `0.2.0-preview.17`. Signed and notarized installers are not yet available. Windows build configuration is included, but managed task execution on Windows is not supported. [Release notes](docs/releases/v0.2.0-preview.17.md).
+> **Preview** — Current version: `0.2.0-preview.18`. Signed and notarized installers are not yet available. Windows build configuration is included, but managed task execution on Windows is not supported. [Release notes](docs/releases/v0.2.0-preview.18.md).
 
 ## Screenshots
 
@@ -69,6 +69,7 @@ A reference design for displaying per-account usage and record timestamps. **Thi
 | **API key profiles** | Authenticate a profile with an API key instead of a subscription login. |
 | **Reset credits** | Check and use Codex reset credits from the account panel, or let them auto-use before expiry. |
 | **Antigravity shared login** | Save and switch the shared Antigravity login (one account at a time). |
+| **API-key provider accounts** | Keep per-account EXAONE and Gemini API keys and run OpenAI-compatible tools with the selected key injected. |
 
 ## Getting started
 

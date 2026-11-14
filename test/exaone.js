@@ -20,7 +20,7 @@ async function atest(name, fn) { await fn(); cases++; console.log('PASS ' + name
   try {
     test('category is separate from TOOLS and starts empty', () => {
       assert.ok(!P.TOOLS.includes('exaone'));
-      assert.deepEqual(P.PROVIDERS, ['exaone']);
+      assert.deepEqual(P.PROVIDERS, ['exaone', 'gemini-api']);
       assert.deepEqual(store.load().exaone, { active: null, profiles: [] });
       assert.deepEqual(exaone.snapshot().accounts, []);
       assert.throws(() => exaone.launchEnv(), /계정이 없습니다/);

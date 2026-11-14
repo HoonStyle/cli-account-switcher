@@ -7,8 +7,9 @@ const EMPTY = () => ({
   version: 1,
   claude: { active: 'default', profiles: ['default'] },
   codex: { active: 'default', profiles: ['default'] },
-  // API-key provider category (exaone.js): no default account, no profile homes.
+  // API-key provider categories (api-provider.js): no default account, no profile homes.
   exaone: { active: null, profiles: [] },
+  'gemini-api': { active: null, profiles: [] },
   realBin: {},
   statusLineOriginal: null,
   apiFetch: false, // optional server-side usage lookup

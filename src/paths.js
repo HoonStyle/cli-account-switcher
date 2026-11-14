@@ -14,9 +14,9 @@ const ROOT = process.env.CLI_ACCOUNTS_ROOT || path.join(HOME, edition.dataDirect
 // "Transitioning Gemini CLI to Antigravity CLI"). Re-enable by adding 'gemini' here.
 const TOOLS = ['claude', 'codex'];
 const DISABLED_TOOLS = ['gemini'];
-// API-key provider categories without a CLI home (see exaone.js). They have their own
-// state section and key files but are never pinned, shimmed, or delegated like TOOLS.
-const PROVIDERS = ['exaone'];
+// API-key provider categories without a CLI home (see api-provider.js, exaone.js, gemini-api.js).
+// They have their own state section and key files but are never pinned, shimmed, or delegated like TOOLS.
+const PROVIDERS = ['exaone', 'gemini-api'];
 
 // Where each tool keeps its config relative to the "home" the env var points at.
 // Claude/Codex: the env var IS the config dir. Gemini: GEMINI_CLI_HOME is a root and the CLI
@@ -49,5 +49,5 @@ module.exports = {
     gemini: ['settings.json', 'GEMINI.md', 'commands', 'extensions', 'skills'],
   },
   USAGE_CACHE_NAME: 'usage-cache.json',
-  LABEL: { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI', exaone: 'EXAONE API' },
+  LABEL: { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI', exaone: 'EXAONE API', 'gemini-api': 'Gemini API' },
 };

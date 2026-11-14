@@ -2,8 +2,9 @@
 // Per-profile API keys, kept separate from subscription logins.
 //   claude: stored here (0600 file under <ROOT>/api-keys/claude/<profileId>) and injected
 //           as ANTHROPIC_API_KEY only into processes launched for that exact profile.
-//   exaone: stored the same way under <ROOT>/api-keys/exaone/<profileId>; exaone.js injects
-//           it as EXAONE_API_KEY / OPENAI_API_KEY into commands run for that account.
+//   exaone, gemini-api: stored the same way under <ROOT>/api-keys/<provider>/<profileId>;
+//           api-provider.js injects them (EXAONE_API_KEY / GEMINI_API_KEY and OPENAI_API_KEY)
+//           into commands run for that account.
 //   codex:  handed to the official `codex login --with-api-key` (stdin) with that profile's
 //           CODEX_HOME, so Codex keeps it in its own credential store. Nothing is stored here.
 // Keys are never accepted on argv and never printed.
@@ -13,13 +14,13 @@ const P = require('./paths');
 
 const DIR = path.join(P.ROOT, 'api-keys');
 // Tools whose keys this module stores itself (file-backed).
-const FILE_TOOLS = new Set(['claude', 'exaone']);
+const FILE_TOOLS = new Set(['claude', 'exaone', 'gemini-api']);
 
 function validId(id) {
   return typeof id === 'string' && /^[\p{L}\p{N}][\p{L}\p{N} ._-]{0,40}$/u.test(id) && !/[\\/:*?"<>|]/.test(id) && id.trim() === id;
 }
 function keyFile(tool, profileId) {
-  if (!FILE_TOOLS.has(tool)) throw new Error(`API 키 파일은 claude·exaone 전용입니다: ${tool}`);
+  if (!FILE_TOOLS.has(tool)) throw new Error(`API 키 파일은 claude·exaone·gemini-api 전용입니다: ${tool}`);
   if (!validId(profileId)) throw new Error('Invalid profile ID');
   return path.join(DIR, tool, profileId);
 }
@@ -77,6 +78,10 @@ function register(tool, profileId, raw, { stdio = 'pipe' } = {}) {
   if (tool === 'exaone') {
     const r = write('exaone', profileId, key);
     return { masked: r.masked, warning: /^sk-/.test(key) ? null : 'EXAONE API 키는 보통 sk- 로 시작합니다' };
+  }
+  if (tool === 'gemini-api') {
+    const r = write('gemini-api', profileId, key);
+    return { masked: r.masked, warning: /^AIza/.test(key) ? null : 'Gemini API 키는 보통 AIza 로 시작합니다' };
   }
   if (tool !== 'codex') throw new Error(`Unsupported tool: ${tool}`);
   const { resolveProfile, launchEnv } = require('./launch/profile-resolver');
