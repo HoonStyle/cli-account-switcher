@@ -32,6 +32,7 @@ module.exports = async context => {
         }
       } finally { fs.rmSync(temporary, { recursive: true, force: true }); }
     }
-    execFileSync('/usr/bin/lipo', ['-verify_arch', arch === 'x64' ? 'x86_64' : 'arm64', binary], { stdio: 'pipe' });
+    // lipo takes the input file before the command; newer Xcode lipo rejects a trailing path after -verify_arch.
+    execFileSync('/usr/bin/lipo', [binary, '-verify_arch', arch === 'x64' ? 'x86_64' : 'arm64'], { stdio: 'pipe' });
   }
 };

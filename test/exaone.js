@@ -89,10 +89,11 @@ async function atest(name, fn) { await fn(); cases++; console.log('PASS ' + name
       assert.equal(exaone.snapshot().accounts[0].check, null);
     });
     await atest('run injects the account env into the child and reports its exit code', async () => {
+      // The probe writes its own output file: no shell involved, so the same case runs on Windows.
       const probe = path.join(root, 'probe.js');
-      fs.writeFileSync(probe, "console.log(JSON.stringify({ k: process.env.EXAONE_API_KEY, o: process.env.OPENAI_API_KEY, b: process.env.OPENAI_BASE_URL, m: process.env.EXAONE_MODEL })); process.exit(Number(process.argv[2] || 0));");
+      fs.writeFileSync(probe, "require('fs').writeFileSync(process.argv[3], JSON.stringify({ k: process.env.EXAONE_API_KEY, o: process.env.OPENAI_API_KEY, b: process.env.OPENAI_BASE_URL, m: process.env.EXAONE_MODEL })); process.exit(Number(process.argv[2] || 0));");
       const out = path.join(root, 'probe.out');
-      const r = await exaone.run('work', ['/bin/sh', '-c', `${JSON.stringify(process.execPath)} ${JSON.stringify(probe)} 3 > ${JSON.stringify(out)}`]);
+      const r = await exaone.run('work', [process.execPath, probe, '3', out]);
       assert.equal(r.code, 3); assert.equal(r.id, 'work');
       assert.deepEqual(JSON.parse(fs.readFileSync(out, 'utf8')), { k: FAKE, o: FAKE, b: 'https://api.exaone.ai/v1', m: 'k-exaone_v2.5' });
       await assert.rejects(exaone.run('work', ['/nonexistent/binary-xyz']), /실행 파일을 찾을 수 없습니다/);

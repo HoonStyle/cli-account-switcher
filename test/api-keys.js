@@ -44,11 +44,15 @@ console.log(JSON.stringify({args:a,anthropic:process.env.ANTHROPIC_API_KEY,opena
     assert.ok(!set.stdout.includes(FAKE_CLAUDE) && !set.stderr.includes(FAKE_CLAUDE), 'key must not be printed');
     const file = path.join(root, 'api-keys', 'claude', 'worker');
     if (!P.IS_WIN) assert.equal(fs.statSync(file).mode & 0o777, 0o600);
-    assert.equal(delegate('claude', 'worker').anthropic, FAKE_CLAUDE);
-    assert.equal(delegate('claude', 'default').anthropic, undefined);
-    assert.equal(delegate('codex', 'worker').anthropic, undefined);
-    assert.equal(delegate('codex', 'worker').openai, undefined);
-    checks += 4;
+    // The fake CLI is a shebang script; Windows cannot spawn it (pinned launch is unsupported there),
+    // so Windows checks the store and console paths only.
+    if (!P.IS_WIN) {
+      assert.equal(delegate('claude', 'worker').anthropic, FAKE_CLAUDE);
+      assert.equal(delegate('claude', 'default').anthropic, undefined);
+      assert.equal(delegate('codex', 'worker').anthropic, undefined);
+      assert.equal(delegate('codex', 'worker').openai, undefined);
+      checks += 4;
+    }
     const listing = JSON.parse(run(['list', '--json']).stdout);
     assert.equal(listing.accounts.find(a => a.tool === 'claude' && a.profileId === 'worker').apiKey, true);
     assert.equal(listing.accounts.find(a => a.tool === 'claude' && a.profileId === 'default').apiKey, false);
@@ -56,6 +60,7 @@ console.log(JSON.stringify({args:a,anthropic:process.env.ANTHROPIC_API_KEY,opena
     const rm = run(['apikey', 'rm', 'claude', 'worker']);
     assert.equal(rm.status, 0, rm.stderr);
     assert.equal(fs.existsSync(file), false);
+    if (P.IS_WIN) continue;
     assert.equal(delegate('claude', 'worker').anthropic, undefined); checks++;
 
     // Codex: official login --with-api-key via stdin, with that profile's CODEX_HOME.

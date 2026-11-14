@@ -78,7 +78,7 @@ async function test(name, fn) { await fn(); cases++; console.log('PASS ' + name)
     assert.equal(result.current.email, 'second@example.invalid');
     assert.equal(f.values.get('gemini/antigravity'), second); assert.equal(fs.readFileSync(f.tokenFile, 'utf8'), second);
     assert.equal(fs.existsSync(path.join(f.opts.common, 'transaction.json')), false);
-    assert.equal(fs.statSync(f.tokenFile).mode & 0o777, 0o600);
+    if (process.platform !== 'win32') assert.equal(fs.statSync(f.tokenFile).mode & 0o777, 0o600); // Windows reports no POSIX mode
   });
   await test('keyring-only installs never gain plaintext credential files', async () => {
     const f = fixture('keyring-only', { file: false }); await seed(f); await f.manager.activate('work'); assert(!fs.existsSync(f.tokenFile));
