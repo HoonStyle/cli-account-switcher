@@ -67,8 +67,46 @@ function usageCell(tool, p) {
   return `<div class="usage" title="${remaining ? '남은 한도' : '사용률'} · 리셋까지 남은 시간 (${src}, ${age(p.usage.capturedAt)})${err ? ' · API 조회 실패: ' + esc(err) : ''}">${lines}${note}</div>`;
 }
 
+// API-key accounts: month-to-date organization spend via a separate admin key (plain keys cannot read billing).
+function costCell(tool, p) {
+  const c = p.apiCost;
+  if (!c) return '<div class="usage" title="사용량 기록 없음">—</div>';
+  const month = Number(String(c.month).slice(5)) || '';
+  const usd = (v) => (v < 0 ? '-$' : '$') + Math.abs(Number(v)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const slot = (label, value, note, title, cls = '') => `<div class="usage-window cost${cls}" title="${esc(title)}"><span class="window-label">${esc(label)}</span><span class="window-value num">${esc(value)}</span><span class="reset-time">${esc(note)}</span></div>`;
+  // Slot 1: this month's spend — the organization total with an admin key, otherwise this Mac's Claude Code sessions.
+  let spend;
+  if (c.adminKey) {
+    // 403: the key is valid but its account lacks the organization admin permission; 401: the key itself was rejected.
+    const denied = /^HTTP 403/.test(c.error || ''), rejected = /^HTTP 401/.test(c.error || '');
+    const failed = denied ? '권한 없음' : rejected ? '키 오류' : '조회 실패';
+    const fix = denied ? ` · 조직 관리자 권한이 필요합니다: ${c.org === 'Anthropic' ? '개인(Individual) Console 계정은 Organization 페이지에서 조직을 설정한 뒤 관리자 키(sk-ant-admin…)를 등록하세요' : '조직 소유자의 관리자 키(sk-admin-…)를 등록하세요'}` : rejected ? ' · 키가 거부되었습니다. 관리자 키를 다시 확인하세요' : '';
+    const orgOk = c.amountUsd != null;
+    const local = !orgOk && c.local ? c.local : null; // fall back to this Mac while the organization lookup fails
+    const value = orgOk ? usd(c.amountUsd) : local ? usd(local.monthUsd) : c.pending ? '조회 중…' : c.error ? failed : '미조회';
+    const note = c.pending ? '조회 중' : orgOk ? (c.error ? '이전 값' : c.capturedAt ? age(c.capturedAt) : '') : local ? '이 PC' : '';
+    const title = `${orgOk ? `${c.org} 조직` : local ? '이 PC의 Claude Code' : c.org + ' 조직'} ${month}월 사용 금액 (UTC 기준 · 관리자 키 ${c.masked || ''})${c.capturedAt ? ' · ' + age(c.capturedAt) : ''}${c.error ? ' · 조직 조회 실패: ' + c.error + fix : ''}`;
+    spend = slot(`${month}월 사용`, value, note, title, c.error && !orgOk && !local ? ' hi' : '');
+  } else if (c.local) {
+    spend = slot(`${month}월 사용`, usd(c.local.monthUsd), '이 PC', `이 PC의 Claude Code 세션 ${c.local.sessions}개가 보고한 ${month}월 사용 금액 (UTC 기준 · Claude Code 자체 계산) · 다른 기기나 API 직접 호출은 빠집니다 · 조직 전체 금액은 관리자 키로 조회`);
+  } else if (tool === 'claude') {
+    spend = slot(`${month}월 사용`, '—', '', '설정의 \'Claude 사용량 수집 (statusline)\'을 켜면 이 PC에서 이 계정으로 쓴 Claude Code 사용 금액을 합산합니다. 조직 전체 금액은 관리자 키를 등록하세요 (개인 Console 계정은 조직 설정 필요).');
+  } else {
+    return `<div class="usage api-cost single"><button class="btn small admin-key" title="${esc(c.org)} 관리자 키(${esc(c.keyHint)})를 등록하면 이번 달 조직 사용 금액을 보여 줍니다. 일반 API 키로는 조회할 수 없고, 충전 잔액은 어느 API로도 제공되지 않습니다.">사용 금액 연결</button></div>`;
+  }
+  if (tool !== 'claude') return `<div class="usage api-cost single">${spend}</div>`;
+  // Slot 2 (Claude): balance entered from the Console Billing page minus this Mac's spend since then.
+  const b = c.balance;
+  const balance = b
+    ? slot('잔액≈', usd(b.estimateUsd), `기준 ${age(b.at)}`, `추정 잔액 = 입력한 잔액 ${usd(b.baseUsd)} (${new Date(b.at).toLocaleString('ko-KR')}) − 이후 이 PC의 Claude Code 사용 ${usd(b.spentSinceUsd)} · 다른 기기·API 직접 호출·자동 충전은 반영되지 않으니 Console Billing에서 가끔 다시 입력하세요`, b.estimateUsd < 5 ? ' crit' : b.estimateUsd < 20 ? ' hi' : '')
+    : `<button class="btn small balance-set" title="Console Billing 페이지의 현재 잔액을 입력하면 이후 이 PC의 Claude Code 사용 금액을 빼서 추정 잔액을 보여 줍니다 (잔액은 API로 제공되지 않음)">잔액 입력</button>`;
+  return `<div class="usage api-cost">${spend}${balance}</div>`;
+}
+
 function creditCell(tool, p) {
-  if (tool !== 'codex' || !p.loggedIn) return '';
+  // API-key Codex accounts have no ChatGPT credits or reset credits; keep the row to its identity line.
+  if (tool !== 'codex' || !p.loggedIn || p.apiKey?.apiKey) return '';
+  const compact = state.density !== 'comfortable';
   const c = p.credits;
   const err = state.apiErrors?.[`${tool}/${p.name}`] || state.apiMeta?.[`${tool}/${p.name}`]?.lastError;
   const stale = c && (!c.capturedAt || Date.now() - Date.parse(c.capturedAt) > 86400000 || err);
@@ -79,14 +117,19 @@ function creditCell(tool, p) {
   const previous = known && (r.stale || r.status === 'error');
   const count = known ? `${r.availableCount.toLocaleString('ko-KR')}개` : r?.status === 'error' ? '조회 실패' : r?.status === 'unavailable' ? '미제공' : '미조회';
   const resetNote = r?.status === 'error' ? `${known ? '이전 값 · ' : ''}조회 실패${r.capturedAt ? ' · ' + age(r.capturedAt) : ''}` : known ? `${previous ? '이전 값 · ' : ''}${age(r.capturedAt) || '시각 미확인'}` : r?.status === 'unavailable' ? '계정에서 정보 미제공' : '조회를 눌러 확인';
-  const expiry = known && r.nearestExpiry && Number.isFinite(Date.parse(r.nearestExpiry)) ? `만료 예정 ${new Date(r.nearestExpiry).toLocaleString('ko-KR', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}` : '';
+  const expiryAt = known && r.nearestExpiry && Number.isFinite(Date.parse(r.nearestExpiry)) ? new Date(r.nearestExpiry) : null;
+  const expiry = !expiryAt ? '' : compact ? `만료 ${expiryAt.getMonth() + 1}/${expiryAt.getDate()} ${String(expiryAt.getHours()).padStart(2, '0')}:${String(expiryAt.getMinutes()).padStart(2, '0')}` : `만료 예정 ${expiryAt.toLocaleString('ko-KR', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}`;
   const automatic = p.resetAutoUse;
   const last = automatic?.lastResult;
   const used = last?.usedAt ? `최근 사용 ${new Date(last.usedAt).toLocaleString('ko-KR', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'})} · ${last.resetConfirmed === true ? '초기화 확인' : '초기화 미확인'}` : last?.apiOutcome === 'alreadyRedeemed' ? '이미 처리된 사용 확인 · 시각 미제공' : '';
-  const autoNote = automatic?.enabled ? `<span class="resource-note auto-reset" title="앱이 실행 중일 때 만료 10분 전부터 사용을 요청합니다. 최초 포함 최대 3회, 1분 간격이며 성공하면 중단합니다.">자동 사용 켜짐 · 만료 10분 전</span>${automatic.text && automatic.status !== 'waiting' ? `<span class="resource-note">${esc(automatic.text)}</span>` : ''}` : '';
-  return `<div class="resources" id="resources-${esc(p.name)}">
-    <div class="resource${!c || (c.balance == null && !c.unlimited) ? ' unknown' : ''}" title="제공된 크레딧 잔액 · 통화나 토큰으로 환산하지 않음"><span class="resource-label">일반 크레딧</span><b class="num">${esc(value)}</b><span class="resource-note">${esc(note)}</span></div>
-    <div class="resource reset-credits${previous ? ' stale' : ''}${!known ? ' unknown' : ''}"><span class="resource-label">리셋권</span><b class="num">${esc(count)}</b><span class="resource-note">${esc(resetNote)}</span>${expiry ? `<span class="resource-note expiry">${esc(expiry)}</span>` : ''}${autoNote}${used ? `<span class="resource-note">${esc(used)}</span>` : ''}<span class="reset-actions"><button class="btn small reset-check" title="공식 codex app-server로 리셋권 개수와 만료 시각을 조회합니다">조회</button><button class="btn small reset-use"${known && r.availableCount === 0 ? ' disabled' : ''} title="가장 먼저 만료되는 리셋권 1개를 지금 사용해 한도를 초기화합니다">지금 사용</button></span></div>
+  const autoTitle = '앱이 실행 중일 때 만료 10분 전부터 사용을 요청합니다. 최초 포함 최대 3회, 1분 간격이며 성공하면 중단합니다.';
+  const autoNote = automatic?.enabled ? `<span class="resource-note auto-reset" title="${autoTitle}">${compact ? '자동 사용' : '자동 사용 켜짐 · 만료 10분 전'}</span>${automatic.text && automatic.status !== 'waiting' ? `<span class="resource-note auto-text">${esc(automatic.text)}</span>` : ''}` : '';
+  // Compact keeps one line: the collection-time notes move into the tooltip and stale values get a short visible marker.
+  const prev = (on) => (on ? '<span class="resource-note prev">이전 값</span>' : '');
+  const title = compact ? ` title="일반 크레딧 ${esc(value)} · ${esc(note)} / 리셋권 ${esc(count)} · ${esc(resetNote)}${used ? ' / ' + esc(used) : ''}"` : '';
+  return `<div class="resources" id="resources-${esc(p.name)}"${title}>
+    <div class="resource${!c || (c.balance == null && !c.unlimited) ? ' unknown' : ''}" title="제공된 크레딧 잔액 · 통화나 토큰으로 환산하지 않음"><span class="resource-label">일반 크레딧</span><b class="num">${esc(value)}</b>${prev(Boolean(c && stale))}<span class="resource-note">${esc(note)}</span></div>
+    <div class="resource reset-credits${previous ? ' stale' : ''}${!known ? ' unknown' : ''}"><span class="resource-label">리셋권</span><b class="num">${esc(count)}</b>${prev(previous)}<span class="resource-note">${esc(resetNote)}</span>${expiry ? `<span class="resource-note expiry">${esc(expiry)}</span>` : ''}${autoNote}${used ? `<span class="resource-note">${esc(used)}</span>` : ''}<span class="reset-actions"><button class="btn small reset-check" title="공식 codex app-server로 리셋권 개수와 만료 시각을 조회합니다">조회</button><button class="btn small reset-use"${known && r.availableCount === 0 ? ' disabled' : ''} title="가장 먼저 만료되는 리셋권 1개를 지금 사용해 한도를 초기화합니다">지금 사용</button></span></div>
   </div>`;
 }
 function row(tool, p, active) {
@@ -94,10 +137,10 @@ function row(tool, p, active) {
   const keyed = Boolean(p.apiKey?.apiKey);
   const idLine = keyed ? `API 키${p.apiKey.masked ? ' ' + esc(p.apiKey.masked) : ''}` : p.loggedIn ? esc(p.email || '이메일 미확인') : '로그인 필요';
   const shown = p.label || p.name;
-  return `<div class="row" role="radio" tabindex="0" aria-checked="${on}" data-name="${esc(p.name)}" aria-label="${esc(shown)} ${on ? '사용 중' : '전환'}"${tool === 'codex' && p.loggedIn ? ` aria-describedby="resources-${esc(p.name)}"` : ''}>
+  return `<div class="row" role="radio" tabindex="0" aria-checked="${on}" data-name="${esc(p.name)}" aria-label="${esc(shown)} ${on ? '사용 중' : '전환'}"${tool === 'codex' && p.loggedIn && !keyed ? ` aria-describedby="resources-${esc(p.name)}"` : ''}>
     <span class="check">${ICON.check}</span>
-    <div class="id"><div class="name"><span class="label" title="${esc([p.isDefault ? '기본 홈 (원래 설정 폴더)' : '', p.name !== shown ? '폴더: ' + p.name : ''].filter(Boolean).join(' · '))}">${esc(shown)}</span>${p.isDefault ? '<span class="tag">기본</span>' : ''}${p.plan ? `<span class="plan" title="${esc(p.planDetail || (p.planUntil ? '갱신/만료 ' + new Date(p.planUntil).toLocaleDateString('ko-KR') : ''))}">${esc(p.plan)}</span>` : ''}</div><div class="email ${p.loggedIn ? '' : 'warn'}" title="${esc(p.email || '')}">${idLine}</div></div>
-    ${p.loggedIn || keyed ? usageCell(tool, p) : `<span class="login-actions"><button class="btn small login">로그인</button><button class="btn small keyset" title="구독 로그인 대신 API 키로 인증">API 키</button></span>`}
+    <div class="id"><div class="name"><span class="label" title="${esc([p.isDefault ? '기본 홈 (원래 설정 폴더)' : '', p.name !== shown ? '폴더: ' + p.name : '', p.loggedIn && !keyed ? p.email || '' : ''].filter(Boolean).join(' · '))}">${esc(shown)}</span>${p.isDefault ? '<span class="tag">기본</span>' : ''}${p.plan ? `<span class="plan" title="${esc(p.planDetail || (p.planUntil ? '갱신/만료 ' + new Date(p.planUntil).toLocaleDateString('ko-KR') : ''))}">${esc(p.plan)}</span>` : ''}</div><div class="email ${p.loggedIn ? '' : 'warn'}" title="${esc(p.email || '')}">${idLine}</div></div>
+    ${keyed ? costCell(tool, p) : p.loggedIn ? usageCell(tool, p) : `<span class="login-actions"><button class="btn small login">로그인</button><button class="btn small keyset" title="구독 로그인 대신 API 키로 인증">API 키</button></span>`}
     <button class="iconbtn more" aria-label="${esc(p.name)} 더 보기" aria-haspopup="menu" aria-expanded="false">${ICON.more}</button>
     ${creditCell(tool, p)}
   </div>`;
@@ -122,6 +165,8 @@ function render() {
       const resetCheck = el.querySelector('.reset-check'); if (resetCheck) resetCheck.onclick = () => checkReset(resetCheck, name);
       const resetUse = el.querySelector('.reset-use'); if (resetUse) resetUse.onclick = () => useReset(resetUse, p);
       const keyset = el.querySelector('.keyset'); if (keyset) keyset.onclick = () => startKeyEntry(el, tool, name);
+      const adminKey = el.querySelector('.admin-key'); if (adminKey) adminKey.onclick = () => startKeyEntry(el, tool, name, 'admin');
+      const balanceSet = el.querySelector('.balance-set'); if (balanceSet) balanceSet.onclick = () => startBalanceEntry(el, tool, name);
       const login = el.querySelector('.login'); if (login) login.onclick = () => run(() => api.login(tool, name), '터미널에서 로그인을 마치면 자동으로 채워집니다');
       el.querySelector('.more').onclick = (e) => openMenu(e.currentTarget, [
         { label: p.loggedIn ? '다시 로그인' : '로그인', act: () => run(() => api.login(tool, name), '터미널에서 로그인을 마치면 자동으로 갱신됩니다') },
@@ -135,6 +180,17 @@ function render() {
         ] : []),
         { label: p.apiKey?.apiKey ? 'API 키 변경…' : 'API 키 등록…', title: '구독 로그인 대신 API 키로 인증합니다 (API 사용량 과금)', act: () => startKeyEntry(el, tool, name) },
         ...(p.apiKey?.apiKey ? [{ label: 'API 키 제거', act: () => runMsg(() => api.removeApiKey(tool, name)) }] : []),
+        ...(p.apiKey?.apiKey && p.apiCost ? [
+          { label: p.apiCost.adminKey ? '사용 금액 관리자 키 변경…' : '사용 금액 관리자 키 등록…', title: `${p.apiCost.org} 관리자 키로 이번 달 조직 사용 금액을 조회합니다 (일반 API 키로는 조회 불가)`, act: () => startKeyEntry(el, tool, name, 'admin') },
+          ...(p.apiCost.adminKey ? [
+            { label: '사용 금액 지금 조회', act: () => runMsg(() => api.apiCost('refresh', tool, name)) },
+            { label: '관리자 키 제거', act: () => runMsg(() => api.apiCost('removeKey', tool, name)) },
+          ] : []),
+          ...(tool === 'claude' ? [
+            { label: p.apiCost.balance ? '잔액 다시 입력…' : '충전 잔액 입력…', title: 'Console Billing 페이지의 현재 잔액을 입력하면 이 PC의 Claude Code 사용 금액을 빼서 추정합니다', act: () => startBalanceEntry(el, tool, name) },
+            ...(p.apiCost.balance ? [{ label: '잔액 기준 지우기', act: () => runMsg(() => api.apiCost('clearBalance', tool, name)) }] : []),
+          ] : []),
+        ] : []),
         { label: '이름 변경', act: () => startRename(el, tool, name, p.label || p.name) },
         { label: '설정 폴더 열기', act: () => api.openHome(tool, name) },
         ...(p.isDefault ? [] : [{ hr: true }, { label: '제거…', danger: true, act: () => run(() => api.removeProfile(tool, name), '') }]),
@@ -167,11 +223,23 @@ function exaoneCheckLine(c, full = false) {
   return `연결 확인 ${when}${full && rate ? ' · 남은 호출 ' + rate : ''}`;
 }
 // API-key provider accounts (exaone, gemini-api): no login, no CLI home. The key never reaches the renderer.
+// An API-key category with no accounts stays out of the panel; the settings menu offers "<이름> 계정 추가…".
+function providerName(id) { return state?.[id]?.label || $(`#${id} > h2`)?.textContent || id; }
+function syncProviderVisibility(id) {
+  const section = $(`#${id}`); if (!section) return;
+  section.hidden = !(state?.[id]?.accounts?.length) && !section.querySelector('.addrow.open');
+}
+function showProviderAdd(id) {
+  const section = $(`#${id}`); if (!section) return;
+  const add = section.querySelector('.addrow');
+  section.hidden = false; add.classList.add('open'); add.querySelector('input').focus(); fit();
+}
 function renderProvider(id) {
   const ex = state[id] || { accounts: [], envNames: [] };
   const keyVars = (ex.envNames || []).filter((n) => /_API_KEY$/.test(n)).join('·');
   const list = $(`#${id} .list`);
   if (!list) return;
+  syncProviderVisibility(id);
   list.innerHTML = ex.accounts.length ? ex.accounts.map((a) => {
     const on = a.active;
     const keyed = Boolean(a.apiKey?.apiKey);
@@ -289,13 +357,14 @@ async function useReset(btn, p) {
 }
 
 // Inline API key entry. The key goes straight to the main process and is never kept in state.
-function startKeyEntry(rowEl, tool, name) {
+function startKeyEntry(rowEl, tool, name, mode = 'api') {
   rowEl.querySelector('.keyentry')?.remove();
   const form = document.createElement('form');
   form.className = 'keyentry';
   const prov = PROVIDERS.includes(tool) ? (state[tool] || {}) : null;
-  const hint = tool === 'claude' ? 'sk-ant-… (이 프로필 실행 시 ANTHROPIC_API_KEY로 사용)' : prov ? `${prov.keyHint || ''} (실행 시 ${(prov.envNames || []).filter((n) => /_API_KEY$/.test(n)).join('·')}로 주입)` : 'sk-… (공식 codex login --with-api-key)';
-  form.innerHTML = `<input type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="${esc(name)} API 키" placeholder="${esc(hint)}"><button type="submit" class="btn small primary">저장</button><button type="button" class="btn small cancel">취소</button>`;
+  const cost = mode === 'admin' ? state.tools?.[tool]?.profiles.find((x) => x.name === name)?.apiCost : null;
+  const hint = cost ? `${cost.keyHint} (${cost.org} 관리자 키 · 이번 달 조직 사용 금액 조회 전용)` : tool === 'claude' ? 'sk-ant-… (이 프로필 실행 시 ANTHROPIC_API_KEY로 사용)' : prov ? `${prov.keyHint || ''} (실행 시 ${(prov.envNames || []).filter((n) => /_API_KEY$/.test(n)).join('·')}로 주입)` : 'sk-… (공식 codex login --with-api-key)';
+  form.innerHTML = `<input type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="${esc(name)} ${cost ? '관리자 키' : 'API 키'}" placeholder="${esc(hint)}"><button type="submit" class="btn small primary">저장</button><button type="button" class="btn small cancel">취소</button>`;
   rowEl.appendChild(form); fit();
   const input = form.querySelector('input');
   const close = () => { form.remove(); fit(); };
@@ -305,7 +374,27 @@ function startKeyEntry(rowEl, tool, name) {
   form.onsubmit = (e) => {
     e.preventDefault(); const key = input.value.trim(); if (!key) return;
     input.value = ''; form.querySelectorAll('input, button').forEach((x) => { x.disabled = true; });
-    runMsg(() => (prov ? api.provider(tool, 'setKey', name, key) : api.setApiKey(tool, name, key)));
+    runMsg(() => (cost ? api.apiCost('setKey', tool, name, key) : prov ? api.provider(tool, 'setKey', name, key) : api.setApiKey(tool, name, key)));
+  };
+  input.focus();
+}
+
+// Inline balance entry (USD from the Console Billing page). Stored with the time it was entered.
+function startBalanceEntry(rowEl, tool, name) {
+  rowEl.querySelector('.keyentry')?.remove();
+  const form = document.createElement('form');
+  form.className = 'keyentry balanceentry';
+  form.innerHTML = `<input type="text" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="${esc(name)} 현재 잔액 (USD)" placeholder="Console Billing의 현재 잔액 USD (예: 48.20)"><button type="submit" class="btn small primary">저장</button><button type="button" class="btn small cancel">취소</button>`;
+  rowEl.appendChild(form); fit();
+  const input = form.querySelector('input');
+  const close = () => { form.remove(); fit(); };
+  form.onclick = (e) => e.stopPropagation();
+  input.onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Escape') close(); };
+  form.querySelector('.cancel').onclick = close;
+  form.onsubmit = (e) => {
+    e.preventDefault(); const v = input.value.trim(); if (!v) return;
+    form.querySelectorAll('input, button').forEach((x) => { x.disabled = true; });
+    runMsg(() => api.apiCost('setBalance', tool, name, v));
   };
   input.focus();
 }
@@ -391,7 +480,7 @@ for (const tool of TOOLS) {
 for (const pid of PROVIDERS) {
   const add = $(`#${pid} .addrow`); if (!add) continue;
   const input = add.querySelector('input');
-  const reset = () => { add.classList.remove('open'); input.value = ''; fit(); };
+  const reset = () => { add.classList.remove('open'); input.value = ''; syncProviderVisibility(pid); fit(); };
   add.querySelector('.link').onclick = () => { add.classList.add('open'); input.focus(); fit(); };
   add.querySelector('.cancel').onclick = reset;
   add.querySelector('form').onsubmit = (e) => {
@@ -419,6 +508,7 @@ $('#settingsBtn').onclick = (e) => openMenu(e.currentTarget, [
   { hr: true },
   ...(state?.zooms || [1, 1.1, 1.25, 1.5]).map((z) => ({ html: CHECK(state?.zoom === z) + `글자 크기 ${Math.round(z * 100)}%`, act: () => run(() => api.setZoom(z), '') })),
   { hr: true },
+  ...PROVIDERS.filter((id) => !(state?.[id]?.accounts?.length)).map((id) => ({ label: `${providerName(id)} 계정 추가…`, title: '계정이 없는 API 키 카테고리는 패널에서 숨깁니다', act: () => showProviderAdd(id) })),
   { label: '셸 래퍼 재설치', act: () => run(() => api.installShims(), '래퍼를 다시 설치했습니다') },
   { label: '새로고침', k: '⌘R', act: refreshNow },
   { hr: true },
@@ -435,6 +525,8 @@ async function refreshNow() {
   if (refreshing) return;
   refreshing = true; const btn = $('#refreshBtn'); btn.classList.add('spin'); btn.disabled = true;
   try {
+    const hasAdmin = TOOLS.some((t) => state?.tools?.[t]?.profiles.some((x) => x.apiCost?.adminKey));
+    if (hasAdmin && api.apiCost) await api.apiCost('refreshAll').catch(() => {});
     if (state?.apiFetch) { say('API 조회 중…'); await runMsg(() => api.apiRefresh()); }
     else await run(() => Promise.resolve(), '갱신됨');
   } finally { refreshing = false; btn.classList.remove('spin'); btn.disabled = false; }

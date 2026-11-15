@@ -89,6 +89,29 @@ process.stdin.on('end', () => {
       fs.renameSync(tmp, out);
     }
   } catch {}
+  // Session cost as reported by Claude Code (cost.total_cost_usd is cumulative per session). Record only the
+  // increase per 10-minute UTC bucket so spend can be summed by month or since a balance was entered.
+  // One file per session id keeps concurrent sessions from contending. Nothing else from the payload is kept.
+  try {
+    const j = JSON.parse(input);
+    const total = j && j.cost && j.cost.total_cost_usd;
+    if (typeof total === 'number' && isFinite(total) && total >= 0 && /^[A-Za-z0-9-]{8,80}$/.test(String(j.session_id || ''))) {
+      const dir = path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'switcher-spend');
+      fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+      const file = path.join(dir, j.session_id + '.json');
+      let rec = null; try { rec = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
+      const last = rec && typeof rec.last === 'number' ? rec.last : 0;
+      const delta = total >= last ? total - last : total; // a lower total starts a new segment
+      if (!rec || delta > 0) {
+        const now = new Date().toISOString(), slot = now.slice(0, 15);
+        const buckets = (rec && rec.buckets && typeof rec.buckets === 'object') ? rec.buckets : {};
+        if (delta > 0) buckets[slot] = Math.round(((buckets[slot] || 0) + delta) * 1e6) / 1e6;
+        const tmp = file + '.' + process.pid + '.tmp';
+        fs.writeFileSync(tmp, JSON.stringify({ v: 1, last: total, updatedAt: now, buckets }), { mode: 0o600 });
+        fs.renameSync(tmp, file);
+      }
+    }
+  } catch {}
   let orig = null;
   try { orig = require(path.join(process.env.CLI_ACCOUNTS_ROOT || path.join(os.homedir(), '${P.DATA_DIRECTORY}'), 'state.json')).statusLineOriginal; } catch {}
   if (orig && orig.command) {
@@ -352,4 +375,4 @@ function usageHookStatus() {
   } catch { return false; }
 }
 
-module.exports = { effectivePath, installShims, pathStatus, registerPath, enableUsageHook, disableUsageHook, usageHookStatus, which };
+module.exports = { effectivePath, installShims, pathStatus, registerPath, enableUsageHook, disableUsageHook, usageHookStatus, which, statusLineHookSource };

@@ -6,6 +6,7 @@ const store = require('./store');
 const claude = require('./claude');
 const codex = require('./codex');
 const apiKeys = require('./api-keys');
+const apiCost = require('./api-cost');
 const wrappers = require('./wrappers');
 const terminal = require('./terminal');
 const { modelCatalog } = require('./model-catalog');
@@ -39,6 +40,14 @@ async function apiRefresh(mode, only, tools = P.TOOLS) {
   }
   refresh();
   return usageApi.summarize(r);
+}
+
+// Organization spend for API-key accounts (admin key). Independent of the subscription usage API so it
+// also works in the distribution edition; automatic calls are at most every 30 minutes per account.
+async function costRefresh(opts = {}) {
+  const r = await apiCost.refreshAll(store.load(), opts);
+  if (Object.keys(r).length) refresh();
+  return r;
 }
 
 // After "add" or "login" we can't know when the browser login finishes, so poll the account
@@ -81,7 +90,9 @@ function snapshot() {
         const home = store.profileHome(tool, name);
         let info;
         try { info = INSPECT[tool](home); } catch (e) { info = { error: e.message, home }; }
-        return { name, label: store.label(state, tool, name), isDefault: name === 'default', ...info, ...(tool === 'claude' ? { apiKey: apiKeys.status('claude', name) } : { apiKey: { apiKey: /^api_?key$/i.test(info.authMode || ''), masked: null } }), ...(tool === 'codex' ? { resetAutoUse: resetAutoUse.summary(name) } : {}), models: modelCatalog(tool, home) };
+        const out = { name, label: store.label(state, tool, name), isDefault: name === 'default', ...info, ...(tool === 'claude' ? { apiKey: apiKeys.status('claude', name) } : { apiKey: { apiKey: /^api_?key$/i.test(info.authMode || ''), masked: null } }), ...(tool === 'codex' ? { resetAutoUse: resetAutoUse.summary(name) } : {}), models: modelCatalog(tool, home) };
+        if (out.apiKey?.apiKey) out.apiCost = apiCost.snapshot(tool, name, Date.now(), { configDir: tool === 'claude' ? P.configDir('claude', home) : null });
+        return out;
       }),
     };
   }
@@ -90,14 +101,22 @@ function snapshot() {
   return out;
 }
 
-const PANEL = { width: 440, height: 760 }; // CSS px; height = max; the renderer fits to content
+// CSS px. Compact (one line per account) is wider so identity, both quota windows and the Codex reset actions
+// share a line; comfortable keeps the original two-line width. Height = max (also capped to the work area).
+const PANEL = { width: 440, compactWidth: 560, height: 1000 };
+function panelWidth(z = zoom()) {
+  const css = store.load().density === 'comfortable' ? PANEL.width : PANEL.compactWidth;
+  let avail = Infinity;
+  try { avail = require('electron').screen.getPrimaryDisplay().workArea.width - 16; } catch {}
+  return Math.round(Math.min(css * z, Math.max(PANEL.width * z, avail)));
+}
 // UI scale ("글자 크기"). Window size = CSS px × zoom; the renderer keeps measuring in CSS px.
 const ZOOMS = [1, 1.1, 1.25, 1.5];
 function zoom() { const z = Number(store.load().zoom); return ZOOMS.includes(z) ? z : 1; }
 
 function createWindow() {
   win = new BrowserWindow({
-    width: Math.round(PANEL.width * zoom()), height: PANEL.height, show: false,
+    width: panelWidth(), height: PANEL.height, show: false,
     frame: false, resizable: false, movable: false, minimizable: false, maximizable: false, fullscreenable: false,
     skipTaskbar: true, alwaysOnTop: true, hasShadow: true,
     transparent: process.platform === 'darwin', backgroundColor: process.platform === 'darwin' ? '#00000000' : '#0f172a',
@@ -140,6 +159,7 @@ function showWindow() {
   win.webContents.send('state', snapshot());
   win.show(); win.focus();
   apiRefresh('auto').catch(() => {});
+  costRefresh().catch(() => {});
 }
 function togglePanel() { if (win && win.isVisible()) win.hide(); else showWindow(); }
 
@@ -198,6 +218,9 @@ app.whenReady().then(() => {
     app.once('before-quit', stopReset);
     const stopLocal = require('./local-refresh').startLocalRefresh(refresh);
     app.once('before-quit', stopLocal);
+    const costTimer = setInterval(() => costRefresh().catch(() => {}), apiCost.STALE_MS);
+    costRefresh().catch(() => {});
+    app.once('before-quit', () => clearInterval(costTimer));
   }
   if (process.platform === 'darwin' && app.dock) app.dock.hide(); // menu bar app, no Dock icon
   app.on('activate', showWindow);
@@ -209,9 +232,10 @@ ipcMain.handle('hide', () => { if (win) win.hide(); return true; });
 ipcMain.handle('resize', (_e, h) => {
   if (!win) return false;
   const z = zoom();
-  const maxH = Math.min(Math.round(PANEL.height * z), require("electron").screen.getPrimaryDisplay().workArea.height - 40);
+  // The panel opens 4px under the menu bar, so only a small margin above the Dock/taskbar is needed.
+  const maxH = Math.min(Math.round(PANEL.height * z), require("electron").screen.getPrimaryDisplay().workArea.height - 16);
   const height = Math.max(240, Math.min(maxH, Math.ceil(h * z)));
-  const width = Math.round(PANEL.width * z);
+  const width = panelWidth(z);
   const [cw, ch] = win.getSize();
   if (cw !== width || ch !== height) { win.setSize(width, height, false); if (win.isVisible()) positionPanel(); }
   return true;
@@ -219,7 +243,7 @@ ipcMain.handle('resize', (_e, h) => {
 ipcMain.handle('setZoom', (_e, z) => {
   const v = ZOOMS.includes(Number(z)) ? Number(z) : 1;
   store.setSetting('zoom', v);
-  if (win) { win.webContents.setZoomFactor(v); win.setSize(Math.round(PANEL.width * v), win.getSize()[1], false); }
+  if (win) { win.webContents.setZoomFactor(v); win.setSize(panelWidth(v), win.getSize()[1], false); }
   refresh();
   return true;
 });
@@ -341,6 +365,7 @@ ipcMain.handle('removeProfile', async (_e, tool, name) => {
   win.on('blur', () => { if (!win.webContents.isDevToolsOpened()) win.hide(); });
   if (response === 2) return false;
   store.removeProfile(tool, name, { deleteFiles: response === 1 });
+  if (['claude', 'codex'].includes(tool)) { apiCost.removeKey(tool, name); apiCost.clearBalance(tool, name); }
   refresh();
   return true;
 });
@@ -351,6 +376,34 @@ ipcMain.handle('setApiKey', (_e, tool, name, key) => {
   (tool === 'claude' ? claude : codex).invalidate(store.profileHome(tool, id));
   refresh();
   return `${store.label(store.load(), tool, id)}: API 키 등록됨 (${r.masked})${r.warning ? ' · ' + r.warning : ''}`;
+});
+// Admin key for month-to-date organization spend (API-key accounts only). The key never comes back to the renderer.
+ipcMain.handle('apiCost', async (_e, action, tool, name, key) => {
+  if (action === 'refreshAll') {
+    const r = await costRefresh({ force: true });
+    const n = Object.keys(r).length, failed = Object.values(r).filter((v) => v !== 'ok').length;
+    return n ? `사용 금액 ${n - failed}/${n}개 계정 갱신${failed ? ' · 실패 ' + failed : ''}` : '';
+  }
+  if (!['claude', 'codex'].includes(tool)) throw new Error('Unsupported tool');
+  const id = store.resolve(tool, name);
+  const label = store.label(store.load(), tool, id);
+  if (action === 'setKey') {
+    const r = apiCost.setKey(tool, id, typeof key === 'string' ? key : '');
+    refresh();
+    const v = await apiCost.refresh(tool, id, { force: true });
+    refresh();
+    return `${label}: 관리자 키 등록됨 (${r.masked})${r.warning ? ' · ' + r.warning : ''} · ${v === 'ok' ? '사용 금액 조회 완료' : '사용 금액 조회 실패: ' + v}`;
+  }
+  if (action === 'removeKey') { apiCost.removeKey(tool, id); refresh(); return `${label}: 관리자 키 제거됨`; }
+  if (action === 'setBalance') { const b = apiCost.setBalance(tool, id, key); refresh(); return `${label}: 잔액 기준 $${b.baseUsd.toFixed(2)} 저장 · 이후 이 PC의 Claude Code 사용 금액을 차감해 추정합니다`; }
+  if (action === 'clearBalance') { apiCost.clearBalance(tool, id); refresh(); return `${label}: 잔액 기준을 지웠습니다`; }
+  if (action === 'refresh') {
+    const pending = apiCost.refresh(tool, id, { force: true }); refresh();
+    const v = await pending; refresh();
+    if (v === 'ok') return `${label}: 사용 금액 조회 완료`;
+    throw new Error(String(v).startsWith('skip:') ? v.replace(/^skip: /, '') : `사용 금액 조회 실패: ${v}`);
+  }
+  throw new Error('Unsupported action');
 });
 ipcMain.handle('removeApiKey', (_e, tool, name) => {
   if (!P.TOOLS.includes(tool)) throw new Error('Unsupported tool');

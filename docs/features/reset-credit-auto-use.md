@@ -61,7 +61,7 @@ Codex 계정의 더 보기 메뉴 → **만료 10분 전 리셋권 자동 사용
 
 ## Manual check and use
 
-Each Codex account's 리셋권 cell has **조회** and **지금 사용** buttons (also in the `…` menu as 리셋권 조회 / 리셋권 지금 사용…). Both go through the profile's official `codex app-server` RPC; they never change the active account.
+Each Codex account's 리셋권 cell has **조회** and **지금 사용** buttons (also in the `…` menu as 리셋권 조회 / 리셋권 지금 사용…). The 간결하게 (compact) density uses a wider 560px panel and keeps the cell to one line (balance, count, nearest expiry, auto-use marker, buttons); if the window is narrower than 500 CSS px the buttons are offered only in the `…` menu. Both go through the profile's official `codex app-server` RPC; they never change the active account. API-key Codex accounts have no credits or reset credits and show no cell.
 
 - **조회** reads `account/rateLimits/read` and updates the displayed count and nearest expiry. It never consumes a credit.
 - **지금 사용** asks for confirmation first, then redeems the earliest-expiring credit with `account/rateLimitResetCredit/consume`. It shares the auto-use lock, per-credit idempotency key, attempt state and `reset-auto-use.jsonl` log (entries carry `"trigger":"manual"`), so auto-use never redeems the same credit again. It is disabled when the known count is 0.

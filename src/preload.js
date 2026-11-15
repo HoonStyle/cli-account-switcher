@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('api', {
   login: (tool, name) => ipcRenderer.invoke('login', tool, name),
   setApiKey: (tool, name, key) => ipcRenderer.invoke('setApiKey', tool, name, key),
   removeApiKey: (tool, name) => ipcRenderer.invoke('removeApiKey', tool, name),
+  apiCost: (action, tool, name, key) => ipcRenderer.invoke('apiCost', action, tool, name, key),
   installShims: () => ipcRenderer.invoke('installShims'),
   registerPath: () => ipcRenderer.invoke('registerPath'),
   usageHook: (enable) => ipcRenderer.invoke('usageHook', enable),

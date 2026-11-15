@@ -20,7 +20,7 @@
 
 CLI Account Switch는 Claude Code와 Codex CLI의 여러 로컬 계정 프로필을 관리하는 Electron 데스크톱 앱입니다. 프로필마다 설정 홈을 분리하고, 선택한 프로필로 공식 CLI를 실행합니다. 로그인과 모델 요청은 사용자가 설치한 공식 CLI가 처리합니다.
 
-> **Preview** — 현재 버전은 `0.2.0-preview.18`입니다. 서명·공증된 설치 파일은 아직 제공하지 않습니다. Windows 빌드 설정은 포함되어 있으나 Windows에서 관리형 작업 실행은 지원하지 않습니다. [릴리스 노트](docs/releases/v0.2.0-preview.18.md).
+> **Preview** — 현재 버전은 `0.2.0-preview.19`입니다. 서명·공증된 설치 파일은 아직 제공하지 않습니다. Windows 빌드 설정은 포함되어 있으나 Windows에서 관리형 작업 실행은 지원하지 않습니다. [릴리스 노트](docs/releases/v0.2.0-preview.19.md).
 
 ## 화면 미리보기
 
@@ -70,6 +70,7 @@ Claude Code와 Codex의 프로필을 선택하고 로컬 사용량 기록을 확
 | **리셋권** | 계정 화면에서 Codex 리셋권을 조회·사용하거나, 만료 전 자동 사용하게 둡니다. |
 | **Antigravity 공용 로그인** | Antigravity 공용 로그인을 저장하고 전환합니다 (한 번에 한 계정). |
 | **API 키 제공자 계정** | EXAONE·Gemini API 키를 계정별로 보관하고, 선택한 키를 주입해 OpenAI 호환 도구를 실행합니다. |
+| **API 키 사용 금액** | Claude·Codex API 키 계정의 이번 달 사용 금액(관리자 키로 조직 전체, 또는 이 PC의 Claude Code 세션 합산)과 Billing에서 입력한 잔액 기준의 Claude 추정 잔액을 보여 줍니다. |
 
 ## 시작하기
 
